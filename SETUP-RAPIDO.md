@@ -47,7 +47,7 @@
 
 Contenuto di `.env.local`:
 ```env
-VITE_APPS_SCRIPT_URL=https://script.google.com/macros/s/IL_TUO_ID_COPIATO/exec
+APPS_SCRIPT_URL=https://script.google.com/macros/s/IL_TUO_ID_COPIATO/exec
 ```
 
 ---
@@ -81,7 +81,7 @@ vercel
 ```
 
 Nel dashboard Vercel aggiungi:
-- `VITE_APPS_SCRIPT_URL` = il tuo URL
+- `APPS_SCRIPT_URL` = il tuo URL
 
 ---
 

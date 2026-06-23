@@ -127,7 +127,7 @@ Ogni utente può impostare preferenze per i turni:
 
 1. `npm i -g vercel`
 2. `vercel` (nella cartella progetto)
-3. Imposta env var: `VITE_APPS_SCRIPT_URL`
+3. Imposta env var: `APPS_SCRIPT_URL`
 4. `vercel --prod`
 
 ### Passo 4: Login
