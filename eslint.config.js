@@ -25,4 +25,11 @@ export default tseslint.config(
       '@typescript-eslint/no-unused-vars': ['error', { caughtErrors: 'none' }],
     },
   },
+  {
+    files: ['public/sw.js'],
+    languageOptions: {
+      ecmaVersion: 2020,
+      globals: globals.serviceworker,
+    },
+  },
 );

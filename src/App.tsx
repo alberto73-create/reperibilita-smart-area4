@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import './App.css'
 import './prefs-bulk.css'
@@ -102,7 +102,7 @@ function App() {
     localStorage.setItem(draftKeyForUser(userId), JSON.stringify(next))
   }
 
-  const hydrateCachedData = (userId: string) => {
+  const hydrateCachedData = useCallback((userId: string) => {
     const cachedRaw = localStorage.getItem(cacheKeyForUser(userId))
     if (!cachedRaw) return false
 
@@ -121,7 +121,7 @@ function App() {
       localStorage.removeItem(cacheKeyForUser(userId))
       return false
     }
-  }
+  }, [])
 
   const hydrateDraftPreferences = (userId: string) => {
     const draftRaw = localStorage.getItem(draftKeyForUser(userId))
@@ -138,7 +138,7 @@ function App() {
     }
   }
 
-  const loadData = async (userIdForCache?: string) => {
+  const loadData = useCallback(async (userIdForCache?: string) => {
     const cacheUserId = userIdForCache || currentUser?.id
     try {
       setLoading(true)
@@ -179,7 +179,7 @@ function App() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [currentUser?.id, hydrateCachedData])
 
   const handleLogin = async (e: FormEvent) => {
     e.preventDefault()
@@ -232,7 +232,7 @@ function App() {
     } else {
       setLoading(false)
     }
-  }, [])
+  }, [hydrateCachedData, loadData])
 
   const getDaysInMonth = (date: Date) => {
     const year = date.getFullYear()
