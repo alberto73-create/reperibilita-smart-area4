@@ -52,6 +52,10 @@ function Preferenze_getPreferencesInternal() {
  */
 function Preferenze_setPreferenceInternal(data, userId) {
   try {
+    if (!data || data.idTecnico !== userId) {
+      return { success: false, error: 'Puoi modificare solo le tue preferenze' };
+    }
+
     const sheet = initPreferenze();
     const rows = sheet.getDataRange().getValues();
 
@@ -72,6 +76,92 @@ function Preferenze_setPreferenceInternal(data, userId) {
       new Date()
     ]);
     return { success: true, action: 'created' };
+  } catch (error) {
+    return { success: false, error: error.toString() };
+  }
+}
+
+/**
+ * Imposta più preferenze con una sola chiamata API (INTERNAL)
+ */
+function Preferenze_setPreferencesBatchInternal(data, userId) {
+  try {
+    const preferences = data && Array.isArray(data.preferences) ? data.preferences : [];
+    if (preferences.length === 0) {
+      return { success: true, updated: 0, created: 0, message: 'Nessuna preferenza da salvare' };
+    }
+
+    const invalid = preferences.find(p => p.idTecnico !== userId || !p.data || !p.preferenza);
+    if (invalid) {
+      return { success: false, error: 'Payload preferenze non valido o non autorizzato' };
+    }
+
+    const sheet = initPreferenze();
+    const rows = sheet.getDataRange().getValues();
+    const rowByKey = {};
+
+    for (let i = 1; i < rows.length; i++) {
+      const key = rows[i][0] + '|' + formatDate(rows[i][2]);
+      rowByKey[key] = i + 1;
+    }
+
+    let updated = 0;
+    const newRows = [];
+    const now = new Date();
+
+    preferences.forEach(pref => {
+      const key = pref.idTecnico + '|' + pref.data;
+      const row = rowByKey[key];
+
+      if (row) {
+        sheet.getRange(row, 4, 1, 3).setValues([[pref.preferenza, getMeseRiferimento(pref.data), now]]);
+        updated++;
+      } else {
+        newRows.push([
+          pref.idTecnico,
+          pref.nomeTecnico,
+          pref.data,
+          pref.preferenza,
+          getMeseRiferimento(pref.data),
+          now
+        ]);
+      }
+    });
+
+    if (newRows.length > 0) {
+      sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, 6).setValues(newRows);
+    }
+
+    SpreadsheetApp.flush();
+    return { success: true, updated: updated, created: newRows.length };
+  } catch (error) {
+    return { success: false, error: error.toString() };
+  }
+}
+
+/**
+ * Cancella tutte le preferenze di un tecnico (INTERNAL)
+ */
+function Preferenze_clearPreferencesForUserInternal(data, userId) {
+  try {
+    const idTecnico = data && data.idTecnico ? data.idTecnico : userId;
+    if (idTecnico !== userId) {
+      return { success: false, error: 'Puoi cancellare solo le tue preferenze' };
+    }
+
+    const sheet = initPreferenze();
+    const rows = sheet.getDataRange().getValues();
+    let deleted = 0;
+
+    for (let i = rows.length - 1; i >= 1; i--) {
+      if (rows[i][0] === idTecnico) {
+        sheet.deleteRow(i + 1);
+        deleted++;
+      }
+    }
+
+    SpreadsheetApp.flush();
+    return { success: true, deleted: deleted };
   } catch (error) {
     return { success: false, error: error.toString() };
   }
