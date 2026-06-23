@@ -88,6 +88,7 @@ function App() {
 
   const [newUser, setNewUser] = useState({ nome: '', cognome: '', email: '' })
   const [selectedDate, setSelectedDate] = useState<string>('')
+  const [bulkTurnDates, setBulkTurnDates] = useState<string[]>([])
   const [selectedUser, setSelectedUser] = useState<string>('')
   const [turnNotes, setTurnNotes] = useState('')
   const [selectedPreference, setSelectedPreference] = useState<PreferenceColor>('BIANCO')
@@ -96,6 +97,47 @@ function App() {
   const [pinToChange, setPinToChange] = useState({ userId: '', newPin: '' })
 
   const activeUsers = useMemo(() => users.filter(u => u.stato === 'ON'), [users])
+  const assignedTurns = useMemo(
+    () => turns
+      .filter(t => t.statoTurno === 'ASSEGNATO')
+      .sort((a, b) => parseLocalDate(a.data).getTime() - parseLocalDate(b.data).getTime()),
+    [turns]
+  )
+
+  const selectedTurnDatesSet = useMemo(() => new Set(bulkTurnDates), [bulkTurnDates])
+  const allAssignedTurnsSelected = assignedTurns.length > 0 && assignedTurns.every(turn => selectedTurnDatesSet.has(turn.data))
+  const selectedAssignedTurnCount = assignedTurns.filter(turn => selectedTurnDatesSet.has(turn.data)).length
+  const turnBalance = useMemo(() => {
+    const byUser = new Map<string, { nome: string; turni: number; punti: number }>()
+
+    users.forEach(user => {
+      byUser.set(user.id, {
+        nome: `${user.nome} ${user.cognome}`,
+        turni: 0,
+        punti: 0
+      })
+    })
+
+    assignedTurns.forEach(turn => {
+      if (!turn.idTecnico) return
+      const current = byUser.get(turn.idTecnico) || {
+        nome: turn.tecnicoAssegnato || turn.idTecnico,
+        turni: 0,
+        punti: 0
+      }
+      current.turni += 1
+      current.punti += Number(turn.puntiAssegnati) || 0
+      byUser.set(turn.idTecnico, current)
+    })
+
+    return Array.from(byUser.entries())
+      .map(([id, value]) => ({ id, ...value }))
+      .filter(item => item.turni > 0 || users.some(user => user.id === item.id && user.stato === 'ON'))
+      .sort((a, b) => b.punti - a.punti || b.turni - a.turni || a.nome.localeCompare(b.nome))
+  }, [assignedTurns, users])
+
+  const balancePoints = turnBalance.map(item => item.punti)
+  const balanceGap = balancePoints.length > 1 ? Math.max(...balancePoints) - Math.min(...balancePoints) : 0
 
   const persistPendingPreferences = (userId: string, next: PendingPreferences) => {
     setPendingPreferences(next)
@@ -320,6 +362,7 @@ function App() {
   const getPointsForDate = (dateStr: string) => {
     const tipo = getTipoGiornoForDate(dateStr)
     if (tipo === 'FESTIVO') return 3
+    if (tipo === 'DOMENICA') return 2
     return 1
   }
 
@@ -383,8 +426,18 @@ function App() {
     if (!currentUser?.isManager) return
     const firstUser = activeUsers[0] || users[0]
     setSelectedDate(formatLocalDate(date))
+    setBulkTurnDates([])
     setSelectedUser(firstUser?.id || '')
     setTurnNotes('Forzatura manuale manager')
+    setShowTurnModal(true)
+  }
+
+  const handleOpenBulkTurnModal = () => {
+    if (!currentUser?.isManager || bulkTurnDates.length === 0) return
+    const firstUser = activeUsers[0] || users[0]
+    setSelectedDate(bulkTurnDates[0] || '')
+    setSelectedUser(firstUser?.id || '')
+    setTurnNotes('Forzatura multipla manager')
     setShowTurnModal(true)
   }
 
@@ -399,24 +452,29 @@ function App() {
         return
       }
 
-      const tipoGiorno = getTipoGiornoForDate(selectedDate)
-      const punti = getPointsForDate(selectedDate)
+      const datesToForce = bulkTurnDates.length > 0 ? bulkTurnDates : [selectedDate]
 
-      await addTurn({
-        data: selectedDate,
-        idTecnico: user.id,
-        tecnicoNome: `${user.nome} ${user.cognome}`,
-        tipoGiorno,
-        punti,
-        note: turnNotes || 'Forzatura manuale manager'
-      })
+      for (const data of datesToForce) {
+        const tipoGiorno = getTipoGiornoForDate(data)
+        const punti = getPointsForDate(data)
+
+        await addTurn({
+          data,
+          idTecnico: user.id,
+          tecnicoNome: `${user.nome} ${user.cognome}`,
+          tipoGiorno,
+          punti,
+          note: turnNotes || (datesToForce.length > 1 ? 'Forzatura multipla manager' : 'Forzatura manuale manager')
+        })
+      }
 
       setShowTurnModal(false)
       setSelectedDate('')
+      setBulkTurnDates([])
       setSelectedUser('')
       setTurnNotes('')
       await loadData()
-      alert('Turno forzato manualmente.')
+      alert(datesToForce.length > 1 ? `${datesToForce.length} turni forzati manualmente.` : 'Turno forzato manualmente.')
     } catch (err) {
       alert('Errore forzatura turno: ' + (err instanceof Error ? err.message : 'errore sconosciuto'))
     }
@@ -430,6 +488,30 @@ function App() {
       await loadData()
     } catch (err) {
       alert('Errore: ' + (err instanceof Error ? err.message : 'errore sconosciuto'))
+    }
+  }
+
+  const handleToggleTurnSelection = (data: string) => {
+    setBulkTurnDates(prev => prev.includes(data) ? prev.filter(item => item !== data) : [...prev, data])
+  }
+
+  const handleToggleAllTurns = () => {
+    setBulkTurnDates(allAssignedTurnsSelected ? [] : assignedTurns.map(turn => turn.data))
+  }
+
+  const handleDeleteSelectedTurns = async () => {
+    if (!currentUser?.isManager || bulkTurnDates.length === 0) return
+    if (!confirm(`Eliminare ${bulkTurnDates.length} turni selezionati?`)) return
+
+    try {
+      for (const data of bulkTurnDates) {
+        await deleteTurn(data)
+      }
+      setBulkTurnDates([])
+      await loadData()
+      alert('Turni selezionati eliminati.')
+    } catch (err) {
+      alert('Errore eliminazione multipla: ' + (err instanceof Error ? err.message : 'errore sconosciuto'))
     }
   }
 
@@ -830,13 +912,58 @@ function App() {
             <div className="view-header">
               <h2>📋 Turni</h2>
             </div>
+            <div className="turn-balance-panel">
+              <div>
+                <strong>Bilanciamento turni</strong>
+                <p>Scarto punti tra tecnico più carico e meno carico: <strong>{balanceGap}</strong>.</p>
+              </div>
+              <div className="turn-balance-list">
+                {turnBalance.map(item => (
+                  <span key={item.id} className="turn-balance-chip">
+                    {item.nome}: {item.turni} turni · {item.punti} pt
+                  </span>
+                ))}
+              </div>
+            </div>
+            {currentUser?.isManager && (
+              <div className="turns-bulk-actions">
+                <span>{selectedAssignedTurnCount} turni assegnati selezionati</span>
+                <button className="secondary-action" onClick={handleToggleAllTurns}>
+                  {allAssignedTurnsSelected ? 'Deseleziona tutto' : 'Seleziona tutto'}
+                </button>
+                <button className="success-action" disabled={selectedAssignedTurnCount === 0} onClick={handleOpenBulkTurnModal}>↯ Forza selezionati</button>
+                <button className="danger-action" disabled={selectedAssignedTurnCount === 0} onClick={handleDeleteSelectedTurns}>Elimina selezionati</button>
+              </div>
+            )}
             <table className="turns-table">
               <thead>
-                <tr><th>Data</th><th>Giorno</th><th>Tipo</th><th>Tecnico</th><th>Punti</th>{currentUser?.isManager && <th>Azioni</th>}</tr>
+                <tr>
+                  {currentUser?.isManager && (
+                    <th>
+                      <input
+                        type="checkbox"
+                        checked={allAssignedTurnsSelected}
+                        onChange={handleToggleAllTurns}
+                        aria-label="Seleziona tutti i turni"
+                      />
+                    </th>
+                  )}
+                  <th>Data</th><th>Giorno</th><th>Tipo</th><th>Tecnico</th><th>Punti</th>{currentUser?.isManager && <th>Azioni</th>}
+                </tr>
               </thead>
               <tbody>
-                {turns.filter(t => t.statoTurno === 'ASSEGNATO').sort((a, b) => parseLocalDate(a.data).getTime() - parseLocalDate(b.data).getTime()).map(turn => (
+                {assignedTurns.map(turn => (
                   <tr key={turn.data}>
+                    {currentUser?.isManager && (
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={selectedTurnDatesSet.has(turn.data)}
+                          onChange={() => handleToggleTurnSelection(turn.data)}
+                          aria-label={`Seleziona turno del ${turn.data}`}
+                        />
+                      </td>
+                    )}
                     <td>{parseLocalDate(turn.data).toLocaleDateString('it-IT')}</td>
                     <td>{turn.giorno}</td>
                     <td><span className={`turn-type ${turn.tipoGiorno.toLowerCase()}`}>{turn.tipoGiorno}</span></td>
@@ -922,9 +1049,16 @@ function App() {
       {showTurnModal && (
         <div className="modal-overlay" onClick={() => setShowTurnModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <h3>↯ Forza Turno Manuale</h3>
+            <h3>↯ {bulkTurnDates.length > 0 ? 'Forza Turni Selezionati' : 'Forza Turno Manuale'}</h3>
             <form onSubmit={handleAddTurn}>
-              <div className="form-group"><label>Data</label><input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} required /></div>
+              {bulkTurnDates.length > 0 ? (
+                <div className="form-group">
+                  <label>Turni selezionati</label>
+                  <p className="bulk-selection-summary">{bulkTurnDates.length} date: {bulkTurnDates.join(', ')}</p>
+                </div>
+              ) : (
+                <div className="form-group"><label>Data</label><input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} required /></div>
+              )}
               <div className="form-group">
                 <label>Tecnico</label>
                 <select value={selectedUser} onChange={e => setSelectedUser(e.target.value)} required>
@@ -935,7 +1069,7 @@ function App() {
               <div className="form-group"><label>Note</label><input type="text" value={turnNotes} onChange={e => setTurnNotes(e.target.value)} /></div>
               <div className="modal-actions">
                 <button type="button" onClick={() => setShowTurnModal(false)}>Annulla</button>
-                <button type="submit" className="primary">Forza turno</button>
+                <button type="submit" className="primary">{bulkTurnDates.length > 0 ? 'Forza turni' : 'Forza turno'}</button>
               </div>
             </form>
           </div>
