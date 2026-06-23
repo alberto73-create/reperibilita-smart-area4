@@ -34,6 +34,7 @@ apps-script/01_FORMATTA_FOGLIO.gs
 4. Clicca **Salva**.
 5. Come nome progetto puoi usare: `01 - Formatta foglio reperibilità`.
 6. Esegui la funzione `formattaFoglioReperibilitaArea4`.
+7. Non eseguire funzioni interne come `getSheet`, `getOrCreateSheet_` o simili: servono solo allo script.
 
 Il Google Sheet verrà rinominato automaticamente in:
 
@@ -64,11 +65,12 @@ apps-script/Code.gs.COMPLETO.js
 
 ## 4. Inizializza i fogli
 
-1. Nel menu in alto di Apps Script seleziona la funzione `initTutto`.
+1. Nel menu in alto di Apps Script seleziona la funzione `STEP2_inizializzaApi`.
 2. Clicca **Esegui**.
-3. Autorizza i permessi richiesti.
-4. Se Google mostra “app non verificata”, clicca **Avanzate → Vai al progetto → Consenti**.
-5. Torna nel Google Sheet e verifica che siano stati creati questi fogli:
+3. In alternativa puoi eseguire `initTutto`, ma non devi eseguire `getSheet`: è una funzione interna.
+4. Autorizza i permessi richiesti.
+5. Se Google mostra “app non verificata”, clicca **Avanzate → Vai al progetto → Consenti**.
+6. Torna nel Google Sheet e verifica che siano stati creati questi fogli:
    - `Auth`
    - `Anagrafica`
    - `Calendario`
@@ -211,7 +213,7 @@ https://script.google.com/macros/s/XXXXXXXXXXXXXXXXXXXXXXXX/exec?action=getUsers
 | Login fallito | Dati non inizializzati o PIN cambiato | Esegui `initTutto` e prova `manager@azienda.com` / `0000` |
 | Schermata errore nel frontend | Apps Script non raggiungibile | Testa prima l'URL diretto nel browser |
 | Modifiche Apps Script non visibili | Deploy non aggiornato | In Apps Script crea una nuova distribuzione o modifica quella esistente con nuova versione |
-| `Foglio non trovato: undefined` | Hai eseguito una funzione sbagliata, di solito `getSheet`, invece della funzione di setup | Seleziona ed esegui `formattaFoglioReperibilitaArea4` per formattare il foglio, oppure `initTutto` dopo aver incollato lo script completo |
+| `Foglio non trovato: undefined` | Hai eseguito una funzione interna, di solito `getSheet`, invece della funzione di setup | Al primo passaggio esegui `formattaFoglioReperibilitaArea4`; dopo aver incollato lo script completo esegui `STEP2_inizializzaApi` |
 
 ---
 

@@ -15,6 +15,10 @@
  */
 
 function getSheet(name) {
+  if (!name) {
+    throw new Error('Non eseguire getSheet dal menu. È una funzione interna: seleziona ed esegui STEP2_inizializzaApi oppure initTutto.');
+  }
+
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName(name);
   if (!sheet) {
@@ -877,4 +881,8 @@ function initTutto() {
   initPreferenze();
   initLog();
   SpreadsheetApp.getUi().alert('✅ Inizializzazione completata!\n\nTutti i fogli sono stati creati.');
+}
+
+function STEP2_inizializzaApi() {
+  initTutto();
 }

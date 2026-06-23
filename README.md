@@ -116,9 +116,7 @@ Ogni utente può impostare preferenze per i turni:
 3. Copia il contenuto di `apps-script/01_FORMATTA_FOGLIO.gs` in `Code.gs`
 4. Esegui `formattaFoglioReperibilitaArea4()` per creare e formattare i tab
 5. Sostituisci il codice con `apps-script/Code.gs.COMPLETO.js`
-6. Esegui `initTutto()` una volta sola
-
-Per la procedura completa passo-passo usa `GUIDA-AVVIO-GOOGLE-SHEETS.md`.
+6. Esegui `STEP2_inizializzaApi()` una volta sola
 
 Per la procedura completa passo-passo usa `GUIDA-AVVIO-GOOGLE-SHEETS.md`.
 

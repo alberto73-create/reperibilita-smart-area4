@@ -297,3 +297,11 @@ function initTutto() {
 
   SpreadsheetApp.getUi().alert('✅ Inizializzazione completata!\n\nTutti i fogli sono stati creati.');
 }
+
+/**
+ * Funzione esplicita da selezionare nel menu di Apps Script dopo aver copiato
+ * Code.gs.COMPLETO.js. Evita di eseguire per errore funzioni interne come getSheet.
+ */
+function STEP2_inizializzaApi() {
+  initTutto();
+}

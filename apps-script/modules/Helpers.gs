@@ -9,6 +9,10 @@
  * Ottieni sheet (lancia errore se non esiste)
  */
 function getSheet(name) {
+  if (!name) {
+    throw new Error('Non eseguire getSheet dal menu. È una funzione interna: seleziona ed esegui STEP2_inizializzaApi oppure initTutto.');
+  }
+
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName(name);
   if (!sheet) {

@@ -26,15 +26,17 @@
 2. **Copia e incolla** il file `apps-script/Code.gs.COMPLETO.js`
 3. Clicca su **Salva** (💾)
 4. Dai il nome: `Reperibilità API`
-5. **Deploy** → **Nuova distribuzione**
-6. Clicca su ⚙️ → **App Web**
-7. Configura:
+5. Seleziona la funzione `STEP2_inizializzaApi` e clicca su **Esegui** (▶️)
+6. Non eseguire `getSheet`: è una funzione interna
+7. **Deploy** → **Nuova distribuzione**
+8. Clicca su ⚙️ → **App Web**
+9. Configura:
    - **Descrizione**: `v1`
    - **Esegui come**: **Me**
    - **Chi può accedere**: **Chiunque**
-8. Clicca su **Deploy**
-9. **Autorizza** (Avanzate → Apri → Consenti)
-10. **Copia l'URL** dell'App Web
+10. Clicca su **Deploy**
+11. **Autorizza** (Avanzate → Apri → Consenti)
+12. **Copia l'URL** dell'App Web
 
 ---
 
