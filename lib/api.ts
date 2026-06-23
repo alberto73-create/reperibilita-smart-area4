@@ -1,9 +1,11 @@
 const API_BASE = '/api';
-const API_TIMEOUT_MS = 20000;
+const DEFAULT_API_TIMEOUT_MS = 25000;
+const LONG_API_TIMEOUT_MS = 55000;
 
 import type { User, Turn, Preference, Holiday, LogEntry, Stats } from '../src/types';
 
 type PreferenceColor = 'VERDE' | 'BIANCO' | 'GIALLO' | 'ROSSO';
+type ApiCallOptions = { forcePost?: boolean; timeoutMs?: number };
 
 interface LoginResult {
   success: boolean;
@@ -18,15 +20,24 @@ interface LoginResult {
   error?: string;
 }
 
-async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  timeoutMs: number = DEFAULT_API_TIMEOUT_MS
+): Promise<Response> {
   const controller = new AbortController();
-  const timeoutId = window.setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     return await fetch(input, {
       ...init,
       signal: controller.signal,
     });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`Timeout: il backend non ha risposto entro ${Math.round(timeoutMs / 1000)} secondi. Riprova tra poco.`);
+    }
+    throw error;
   } finally {
     window.clearTimeout(timeoutId);
   }
@@ -46,7 +57,7 @@ async function parseJsonResponse<T = any>(response: Response): Promise<T> {
   }
 }
 
-async function callAPI(action: string, data?: any, options?: { forcePost?: boolean }): Promise<any> {
+async function callAPI(action: string, data?: any, options?: ApiCallOptions): Promise<any> {
   const params = new URLSearchParams({ action });
   const token = localStorage.getItem('auth_token');
   if (token) {
@@ -65,7 +76,7 @@ async function callAPI(action: string, data?: any, options?: { forcePost?: boole
     body: hasBody ? JSON.stringify(data ?? {}) : undefined,
   };
 
-  const response = await fetchWithTimeout(url, requestOptions);
+  const response = await fetchWithTimeout(url, requestOptions, options?.timeoutMs);
   const result = await parseJsonResponse<any>(response);
 
   if (!response.ok) {
@@ -168,12 +179,12 @@ export async function setPreferencesBatch(preferences: Array<{
   data: string;
   preferenza: PreferenceColor;
 }>): Promise<void> {
-  const result = await callAPI('setPreferencesBatch', { preferences });
+  const result = await callAPI('setPreferencesBatch', { preferences }, { timeoutMs: LONG_API_TIMEOUT_MS });
   if (!result.success) throw new Error(result.error);
 }
 
 export async function clearPreferencesForUser(idTecnico: string): Promise<void> {
-  const result = await callAPI('clearPreferencesForUser', { idTecnico });
+  const result = await callAPI('clearPreferencesForUser', { idTecnico }, { timeoutMs: LONG_API_TIMEOUT_MS });
   if (!result.success) throw new Error(result.error);
 }
 
@@ -201,13 +212,13 @@ export async function getStats(): Promise<Stats> {
 // ==================== MANAGER ====================
 
 export async function calculateTurniAutomatici(): Promise<{ assegnazioni: number; anomalie: any[] }> {
-  const result = await callAPI('calculateTurni', {}, { forcePost: true });
+  const result = await callAPI('calculateTurni', {}, { forcePost: true, timeoutMs: LONG_API_TIMEOUT_MS });
   if (!result.success) throw new Error(result.error);
   return { assegnazioni: result.assegnazioni, anomalie: result.anomalie || [] };
 }
 
 export async function updatePoints(): Promise<void> {
-  const result = await callAPI('updatePoints', {}, { forcePost: true });
+  const result = await callAPI('updatePoints', {}, { forcePost: true, timeoutMs: LONG_API_TIMEOUT_MS });
   if (!result.success) throw new Error(result.error);
 }
 
