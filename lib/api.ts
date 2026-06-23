@@ -3,6 +3,8 @@ const API_TIMEOUT_MS = 20000;
 
 import type { User, Turn, Preference, Holiday, LogEntry, Stats } from '../src/types';
 
+type PreferenceColor = 'VERDE' | 'BIANCO' | 'GIALLO' | 'ROSSO';
+
 interface LoginResult {
   success: boolean;
   user?: {
@@ -44,7 +46,7 @@ async function parseJsonResponse<T = any>(response: Response): Promise<T> {
   }
 }
 
-async function callAPI(action: string, data?: any): Promise<any> {
+async function callAPI(action: string, data?: any, options?: { forcePost?: boolean }): Promise<any> {
   const params = new URLSearchParams({ action });
   const token = localStorage.getItem('auth_token');
   if (token) {
@@ -52,17 +54,18 @@ async function callAPI(action: string, data?: any): Promise<any> {
   }
 
   const url = `${API_BASE}?${params.toString()}`;
+  const hasBody = data !== undefined || options?.forcePost === true;
 
-  const options: RequestInit = {
-    method: data ? 'POST' : 'GET',
+  const requestOptions: RequestInit = {
+    method: hasBody ? 'POST' : 'GET',
     cache: 'no-store',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: data ? JSON.stringify(data) : undefined,
+    body: hasBody ? JSON.stringify(data ?? {}) : undefined,
   };
 
-  const response = await fetchWithTimeout(url, options);
+  const response = await fetchWithTimeout(url, requestOptions);
   const result = await parseJsonResponse<any>(response);
 
   if (!response.ok) {
@@ -153,9 +156,24 @@ export async function setPreference(preference: {
   idTecnico: string;
   nomeTecnico: string;
   data: string;
-  preferenza: 'VERDE' | 'BIANCO' | 'GIALLO' | 'ROSSO';
+  preferenza: PreferenceColor;
 }): Promise<void> {
   const result = await callAPI('setPreference', preference);
+  if (!result.success) throw new Error(result.error);
+}
+
+export async function setPreferencesBatch(preferences: Array<{
+  idTecnico: string;
+  nomeTecnico: string;
+  data: string;
+  preferenza: PreferenceColor;
+}>): Promise<void> {
+  const result = await callAPI('setPreferencesBatch', { preferences });
+  if (!result.success) throw new Error(result.error);
+}
+
+export async function clearPreferencesForUser(idTecnico: string): Promise<void> {
+  const result = await callAPI('clearPreferencesForUser', { idTecnico });
   if (!result.success) throw new Error(result.error);
 }
 
@@ -183,13 +201,13 @@ export async function getStats(): Promise<Stats> {
 // ==================== MANAGER ====================
 
 export async function calculateTurniAutomatici(): Promise<{ assegnazioni: number; anomalie: any[] }> {
-  const result = await callAPI('calculateTurni');
+  const result = await callAPI('calculateTurni', {}, { forcePost: true });
   if (!result.success) throw new Error(result.error);
-  return { assegnazioni: result.assegnazioni, anomalie: result.anomalie };
+  return { assegnazioni: result.assegnazioni, anomalie: result.anomalie || [] };
 }
 
 export async function updatePoints(): Promise<void> {
-  const result = await callAPI('updatePoints');
+  const result = await callAPI('updatePoints', {}, { forcePost: true });
   if (!result.success) throw new Error(result.error);
 }
 
