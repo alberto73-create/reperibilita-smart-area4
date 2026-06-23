@@ -1,7 +1,23 @@
-.cache-note {
+.cache-note,
+.window-note,
+.lock-note {
   margin: 0 0 1rem;
   color: #64748b;
   font-size: 0.85rem;
+}
+
+.window-note,
+.lock-note {
+  padding: 0.75rem 0.9rem;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+
+.lock-note {
+  background: #fff7ed;
+  color: #9a3412;
+  border-color: #fed7aa;
 }
 
 .day-badges {
@@ -16,10 +32,50 @@
   line-height: 1;
 }
 
+.lock-badge {
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
 .calendar-day.pending-pref,
 .preference-card.pending-pref {
   outline: 3px solid rgba(22, 163, 74, 0.35);
   outline-offset: -3px;
+}
+
+.calendar-day.locked-day,
+.preference-card.locked-card {
+  opacity: 0.78;
+}
+
+.preference-lock {
+  margin: 0.5rem 0;
+  color: #9a3412;
+  font-size: 0.78rem;
+  line-height: 1.25;
+}
+
+.force-turn-btn {
+  position: absolute;
+  bottom: 0.5rem;
+  right: 0.5rem;
+  min-width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 2px solid #7c3aed;
+  background: white;
+  color: #7c3aed;
+  font-weight: 800;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.35rem;
+}
+
+.force-turn-btn:hover {
+  background: #7c3aed;
+  color: white;
 }
 
 .calendar-bulk-actions {
@@ -81,6 +137,10 @@
   color: #fff;
 }
 
+.mini-month-header {
+  margin: 1rem 0;
+}
+
 @media (max-width: 768px) {
   .calendar-bulk-actions {
     align-items: stretch;
@@ -96,7 +156,6 @@
   }
 }
 
-/* ==================== MOBILE POLISH ==================== */
 @media (max-width: 640px) {
   body {
     overflow-x: hidden;
@@ -202,6 +261,10 @@
     place-items: center;
   }
 
+  .calendar-header button:disabled {
+    opacity: 0.35;
+  }
+
   .calendar-legend {
     display: grid !important;
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -222,7 +285,9 @@
     flex: 0 0 13px;
   }
 
-  .cache-note {
+  .cache-note,
+  .window-note,
+  .lock-note {
     margin-bottom: 0.75rem;
     font-size: 0.72rem;
     line-height: 1.25;
@@ -250,14 +315,11 @@
     overflow: hidden;
   }
 
-  .calendar-day {
+  .calendar-day,
+  .calendar-day.empty {
     min-height: 5.15rem;
     padding: 0.3rem;
     overflow: hidden;
-  }
-
-  .calendar-day.empty {
-    min-height: 5.15rem;
   }
 
   .day-header {
@@ -279,7 +341,8 @@
     line-height: 1;
   }
 
-  .pending-badge {
+  .pending-badge,
+  .lock-badge {
     font-size: 0.72rem;
   }
 
@@ -297,8 +360,10 @@
     text-overflow: ellipsis;
   }
 
-  .add-preference-btn {
+  .add-preference-btn,
+  .force-turn-btn {
     width: 1.75rem;
+    min-width: 1.75rem;
     height: 1.75rem;
     right: 0.25rem;
     bottom: 0.25rem;
@@ -331,6 +396,10 @@
 
   .preferences-grid {
     grid-template-columns: 1fr;
+  }
+
+  .preference-lock {
+    font-size: 0.72rem;
   }
 
   .manager-cards {
