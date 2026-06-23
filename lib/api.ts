@@ -1,4 +1,5 @@
 const API_BASE = '/api';
+const API_TIMEOUT_MS = 20000;
 
 import type { User, Turn, Preference, Holiday, LogEntry, Stats } from '../src/types';
 
@@ -15,6 +16,34 @@ interface LoginResult {
   error?: string;
 }
 
+async function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+async function parseJsonResponse<T = any>(response: Response): Promise<T> {
+  const text = await response.text();
+
+  if (!text) {
+    return {} as T;
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error('Risposta API non valida');
+  }
+}
+
 async function callAPI(action: string, data?: any): Promise<any> {
   const params = new URLSearchParams({ action });
   const token = localStorage.getItem('auth_token');
@@ -26,20 +55,25 @@ async function callAPI(action: string, data?: any): Promise<any> {
 
   const options: RequestInit = {
     method: data ? 'POST' : 'GET',
+    cache: 'no-store',
     headers: {
       'Content-Type': 'application/json',
     },
     body: data ? JSON.stringify(data) : undefined,
   };
 
-  const response = await fetch(url, options);
+  const response = await fetchWithTimeout(url, options);
+  const result = await parseJsonResponse<any>(response);
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Request failed' }));
-    throw new Error(error.error || `API error: ${response.statusText}`);
+    throw new Error(result.error || `API error: ${response.statusText}`);
   }
 
-  return await response.json();
+  if (result?.success === false) {
+    throw new Error(result.error || 'Operazione non riuscita');
+  }
+
+  return result;
 }
 
 // ==================== AUTH ====================
@@ -47,8 +81,17 @@ async function callAPI(action: string, data?: any): Promise<any> {
 export async function login(email: string, pin: string): Promise<LoginResult> {
   const params = new URLSearchParams({ action: 'login', email, pin });
   const url = `${API_BASE}?${params.toString()}`;
-  const response = await fetch(url, { method: 'GET' });
-  return await response.json();
+  const response = await fetchWithTimeout(url, { method: 'GET', cache: 'no-store' });
+  const result = await parseJsonResponse<LoginResult>(response);
+
+  if (!response.ok) {
+    return {
+      success: false,
+      error: result.error || `API error: ${response.statusText}`,
+    };
+  }
+
+  return result;
 }
 
 // ==================== UTENTI ====================
