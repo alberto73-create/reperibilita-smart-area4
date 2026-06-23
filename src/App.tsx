@@ -4,9 +4,35 @@ import type { User, Turn, Preference, Holiday, LogEntry, Stats } from './types'
 import {
   login as apiLogin,
   getUsers, getTurns, getPreferences, getLog, getStats, getHolidays,
-  addUser, setUserStatus, addTurn, deleteTurn, setPreference,
+  addUser, setUserStatus, addTurn, deleteTurn, setPreference, setPreferencesBatch, clearPreferencesForUser,
   calculateTurniAutomatici, updatePoints, changePin, resetPin
 } from '../lib/api'
+
+type PreferenceColor = 'VERDE' | 'BIANCO' | 'GIALLO' | 'ROSSO'
+type PendingPreferences = Record<string, PreferenceColor>
+
+type CachedAppData = {
+  users: User[]
+  turns: Turn[]
+  preferences: Preference[]
+  holidays: Holiday[]
+  stats: Stats | null
+  savedAt: string
+}
+
+const pad2 = (value: number) => String(value).padStart(2, '0')
+
+const formatLocalDate = (date: Date) => {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
+}
+
+const parseLocalDate = (value: string) => {
+  const [year, month, day] = value.split('-').map(Number)
+  return new Date(year, month - 1, day)
+}
+
+const cacheKeyForUser = (userId: string) => `reperibilita_cache_${userId}`
+const draftKeyForUser = (userId: string) => `reperibilita_preference_drafts_${userId}`
 
 function App() {
   // Auth State
@@ -28,6 +54,7 @@ function App() {
   const [stats, setStats] = useState<Stats | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [lastCacheAt, setLastCacheAt] = useState<string>('')
   
   // Calendar
   const [currentMonth, setCurrentMonth] = useState(new Date())
@@ -43,44 +70,55 @@ function App() {
   
   // Preference
   const [showPreferenceModal, setShowPreferenceModal] = useState(false)
-  const [selectedPreference, setSelectedPreference] = useState<'VERDE' | 'BIANCO' | 'GIALLO' | 'ROSSO'>('BIANCO')
+  const [selectedPreference, setSelectedPreference] = useState<PreferenceColor>('BIANCO')
+  const [pendingPreferences, setPendingPreferences] = useState<PendingPreferences>({})
+  const [savingPreferences, setSavingPreferences] = useState(false)
   const [pinToChange, setPinToChange] = useState({ userId: '', newPin: '' })
 
-  // Login
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setIsLoading(true)
-    setLoginError('')
-    
+  const persistPendingPreferences = (userId: string, next: PendingPreferences) => {
+    setPendingPreferences(next)
+    localStorage.setItem(draftKeyForUser(userId), JSON.stringify(next))
+  }
+
+  const hydrateCachedData = (userId: string) => {
+    const cachedRaw = localStorage.getItem(cacheKeyForUser(userId))
+    if (!cachedRaw) return false
+
     try {
-      const result = await apiLogin(loginEmail, loginPin)
-      
-      if (result.success) {
-        setIsAuthenticated(true)
-        setCurrentUser(result.user)
-        localStorage.setItem('auth_token', result.token || '')
-        localStorage.setItem('current_user', JSON.stringify(result.user))
-        loadData()
-      } else {
-        setLoginError(result.error || 'Login fallito')
-      }
-    } catch (err) {
-      setLoginError('Errore di connessione')
-    } finally {
-      setIsLoading(false)
+      const cached = JSON.parse(cachedRaw) as CachedAppData
+      setUsers(cached.users || [])
+      setTurns(cached.turns || [])
+      setPreferences(cached.preferences || [])
+      setHolidays(cached.holidays || [])
+      setStats(cached.stats || null)
+      setLastCacheAt(cached.savedAt || '')
+      setError(null)
+      setLoading(false)
+      return true
+    } catch {
+      localStorage.removeItem(cacheKeyForUser(userId))
+      return false
     }
   }
 
-  // Logout
-  const handleLogout = () => {
-    setIsAuthenticated(false)
-    setCurrentUser(null)
-    localStorage.removeItem('auth_token')
-    localStorage.removeItem('current_user')
+  const hydrateDraftPreferences = (userId: string) => {
+    const draftRaw = localStorage.getItem(draftKeyForUser(userId))
+    if (!draftRaw) {
+      setPendingPreferences({})
+      return
+    }
+
+    try {
+      setPendingPreferences(JSON.parse(draftRaw))
+    } catch {
+      localStorage.removeItem(draftKeyForUser(userId))
+      setPendingPreferences({})
+    }
   }
 
   // Load Data
-  const loadData = async () => {
+  const loadData = async (userIdForCache?: string) => {
+    const cacheUserId = userIdForCache || currentUser?.id
     try {
       setLoading(true)
       const [usersData, turnsData, preferencesData, holidaysData, statsData] = await Promise.all([
@@ -96,11 +134,67 @@ function App() {
       setHolidays(holidaysData)
       setStats(statsData)
       setError(null)
+
+      if (cacheUserId) {
+        const savedAt = new Date().toISOString()
+        const cacheData: CachedAppData = {
+          users: usersData,
+          turns: turnsData,
+          preferences: preferencesData,
+          holidays: holidaysData,
+          stats: statsData,
+          savedAt
+        }
+        localStorage.setItem(cacheKeyForUser(cacheUserId), JSON.stringify(cacheData))
+        setLastCacheAt(savedAt)
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Errore nel caricamento')
+      if (cacheUserId && hydrateCachedData(cacheUserId)) {
+        setError(null)
+      } else {
+        setError(err instanceof Error ? err.message : 'Errore nel caricamento')
+      }
     } finally {
       setLoading(false)
     }
+  }
+
+  // Login
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsLoading(true)
+    setLoginError('')
+    
+    try {
+      const result = await apiLogin(loginEmail, loginPin)
+      
+      if (result.success) {
+        setIsAuthenticated(true)
+        setCurrentUser(result.user)
+        localStorage.setItem('auth_token', result.token || '')
+        localStorage.setItem('current_user', JSON.stringify(result.user))
+        if (result.user?.id) {
+          hydrateCachedData(result.user.id)
+          hydrateDraftPreferences(result.user.id)
+        }
+        loadData(result.user?.id)
+      } else {
+        setLoginError(result.error || 'Login fallito')
+      }
+    } catch (err) {
+      setLoginError('Errore di connessione')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Logout
+  const handleLogout = () => {
+    setIsAuthenticated(false)
+    setCurrentUser(null)
+    setPendingPreferences({})
+    localStorage.removeItem('auth_token')
+    localStorage.removeItem('current_user')
   }
 
   // Check saved session
@@ -109,9 +203,12 @@ function App() {
     const savedUser = localStorage.getItem('current_user')
     
     if (savedToken && savedUser) {
-      setCurrentUser(JSON.parse(savedUser))
+      const parsedUser = JSON.parse(savedUser)
+      setCurrentUser(parsedUser)
       setIsAuthenticated(true)
-      loadData()
+      hydrateCachedData(parsedUser.id)
+      hydrateDraftPreferences(parsedUser.id)
+      loadData(parsedUser.id)
     } else {
       setLoading(false)
     }
@@ -181,18 +278,86 @@ function App() {
   }
 
   // Preference Actions
+  const handleOpenPreferenceModal = (date: Date) => {
+    const dateStr = formatLocalDate(date)
+    const existingPref = getPreferenceForDate(date)
+    setSelectedDate(dateStr)
+    setSelectedPreference((existingPref as PreferenceColor) || 'BIANCO')
+    setShowPreferenceModal(true)
+  }
+
   const handleSetPreference = async () => {
+    if (!selectedDate || !currentUser?.id) return
+
+    const next = {
+      ...pendingPreferences,
+      [selectedDate]: selectedPreference
+    }
+    persistPendingPreferences(currentUser.id, next)
+    setShowPreferenceModal(false)
+  }
+
+  const handleSaveAllPreferences = async () => {
+    if (!currentUser?.id) return
+    const entries = Object.entries(pendingPreferences)
+    if (entries.length === 0) {
+      alert('Non ci sono modifiche da salvare.')
+      return
+    }
+
+    if (!confirm(`Vuoi salvare ${entries.length} preferenze in un unico passaggio?`)) return
+
+    const payload = entries.map(([data, preferenza]) => ({
+      idTecnico: currentUser.id,
+      nomeTecnico: currentUser.nome,
+      data,
+      preferenza
+    }))
+
+    setSavingPreferences(true)
     try {
-      await setPreference({
-        idTecnico: currentUser.id,
-        nomeTecnico: currentUser.nome,
-        data: selectedDate,
-        preferenza: selectedPreference
-      })
-      setShowPreferenceModal(false)
-      loadData()
+      try {
+        await setPreferencesBatch(payload)
+      } catch {
+        // Compatibilità con Apps Script non ancora aggiornato: salva comunque, ma solo alla conferma finale.
+        for (const preference of payload) {
+          await setPreference(preference)
+        }
+      }
+
+      localStorage.removeItem(draftKeyForUser(currentUser.id))
+      setPendingPreferences({})
+      await loadData(currentUser.id)
+      alert('Preferenze salvate.')
     } catch (err) {
-      alert('Errore')
+      alert('Errore nel salvataggio preferenze: ' + (err instanceof Error ? err.message : 'errore sconosciuto'))
+    } finally {
+      setSavingPreferences(false)
+    }
+  }
+
+  const handleDiscardLocalPreferences = () => {
+    if (!currentUser?.id) return
+    if (!confirm('Vuoi annullare le modifiche locali non ancora salvate?')) return
+    localStorage.removeItem(draftKeyForUser(currentUser.id))
+    setPendingPreferences({})
+  }
+
+  const handleClearAllPreferences = async () => {
+    if (!currentUser?.id) return
+    if (!confirm('Vuoi cancellare tutte le tue preferenze salvate? Operazione non reversibile.')) return
+
+    setSavingPreferences(true)
+    try {
+      await clearPreferencesForUser(currentUser.id)
+      localStorage.removeItem(draftKeyForUser(currentUser.id))
+      setPendingPreferences({})
+      await loadData(currentUser.id)
+      alert('Tutte le preferenze sono state cancellate.')
+    } catch (err) {
+      alert('Errore nella cancellazione preferenze: ' + (err instanceof Error ? err.message : 'errore sconosciuto'))
+    } finally {
+      setSavingPreferences(false)
     }
   }
 
@@ -204,7 +369,7 @@ function App() {
       alert(`Calcolo completato!\nAssegnazioni: ${result.assegnazioni}\nAnomalie: ${result.anomalie.length}`)
       loadData()
     } catch (err) {
-      alert('Errore: ' + (err as any).message)
+      alert('Errore: ' + (err instanceof Error ? err.message : 'errore sconosciuto'))
     }
   }
 
@@ -215,7 +380,7 @@ function App() {
       alert('Punti aggiornati!')
       loadData()
     } catch (err) {
-      alert('Errore')
+      alert('Errore: ' + (err instanceof Error ? err.message : 'errore sconosciuto'))
     }
   }
 
@@ -255,25 +420,37 @@ function App() {
     let startingDay = firstDay.getDay()
     startingDay = startingDay === 0 ? 6 : startingDay - 1
     
-    const days: (Date | null)[] = []
-    for (let i = 0; i < startingDay; i++) days.push(null)
+    const monthDays: (Date | null)[] = []
+    for (let i = 0; i < startingDay; i++) monthDays.push(null)
     for (let day = 1; day <= lastDay.getDate(); day++) {
-      days.push(new Date(year, month, day))
+      monthDays.push(new Date(year, month, day))
     }
-    return days
+    return monthDays
   }
 
-  const getTurnForDate = (date: Date) => turns.find(t => t.data === date.toISOString().split('T')[0])
+  const isAssignedTurn = (turn: Turn | undefined) => {
+    return Boolean(turn && turn.statoTurno === 'ASSEGNATO' && turn.tecnicoAssegnato)
+  }
+
+  const getTurnForDate = (date: Date) => {
+    const dateStr = formatLocalDate(date)
+    return turns.find(t => t.data === dateStr && isAssignedTurn(t))
+  }
   
   const getPreferenceForDate = (date: Date | null): string | null => {
     if (!date) return null
-    const dateStr = date.toISOString().split('T')[0]
+    const dateStr = formatLocalDate(date)
+
+    if (Object.prototype.hasOwnProperty.call(pendingPreferences, dateStr)) {
+      return pendingPreferences[dateStr]
+    }
+
     const pref = preferences.find(p => p.idTecnico === currentUser?.id && p.data === dateStr)
     return pref ? pref.preferenza : null
   }
 
   const isHoliday = (date: Date): string | null => {
-    const dateStr = date.toISOString().split('T')[0]
+    const dateStr = formatLocalDate(date)
     const holiday = holidays.find(h => h.data === dateStr)
     return holiday ? holiday.nome : null
   }
@@ -281,6 +458,10 @@ function App() {
   const navigateMonth = (delta: number) => {
     setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + delta, 1))
   }
+
+  const days = getDaysInMonth(currentMonth)
+  const monthName = currentMonth.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' })
+  const pendingPreferenceCount = Object.keys(pendingPreferences).length
 
   // LOGIN SCREEN
   if (!isAuthenticated) {
@@ -328,7 +509,7 @@ function App() {
   }
 
   // MAIN APP
-  if (loading) {
+  if (loading && users.length === 0 && turns.length === 0) {
     return <div className="app"><div className="loading">Caricamento...</div></div>
   }
 
@@ -343,9 +524,6 @@ function App() {
       </div>
     )
   }
-
-  const days = getDaysInMonth(currentMonth)
-  const monthName = currentMonth.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' })
 
   return (
     <div className="app">
@@ -386,6 +564,9 @@ function App() {
               <span className="legend-item"><span className="legend-color giallo"></span> Giallo</span>
               <span className="legend-item"><span className="legend-color rosso"></span> Rosso</span>
             </div>
+            {lastCacheAt && (
+              <p className="cache-note">Cache locale attiva · ultimo aggiornamento {new Date(lastCacheAt).toLocaleString('it-IT')}</p>
+            )}
             <div className="calendar-grid">
               <div className="calendar-weekdays">
                 {['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'].map(day => (
@@ -399,30 +580,47 @@ function App() {
                   const isToday = day.toDateString() === new Date().toDateString()
                   const holidayName = isHoliday(day)
                   const pref = getPreferenceForDate(day)
+                  const dateStr = formatLocalDate(day)
+                  const hasPending = Object.prototype.hasOwnProperty.call(pendingPreferences, dateStr)
                   const isWeekend = day.getDay() === 0 || day.getDay() === 6
+                  const canEditPreference = isWeekend || holidayName
                   return (
                     <div
                       key={index}
-                      className={`calendar-day ${isToday ? 'today' : ''} ${turn ? 'has-turn' : ''} ${holidayName ? 'holiday' : ''} ${pref ? `pref-${pref.toLowerCase()}` : ''}`}
+                      className={`calendar-day ${isToday ? 'today' : ''} ${turn ? 'has-turn' : ''} ${holidayName ? 'holiday' : ''} ${pref ? `pref-${pref.toLowerCase()}` : ''} ${hasPending ? 'pending-pref' : ''}`}
                       onDoubleClick={() => {
-                        if ((isWeekend || holidayName) && !turn) {
-                          setSelectedDate(day.toISOString().split('T')[0])
-                          setShowPreferenceModal(true)
+                        if (canEditPreference && !turn) {
+                          handleOpenPreferenceModal(day)
                         }
                       }}
                     >
                       <div className="day-header">
                         <span className="day-number">{day.getDate()}</span>
-                        {holidayName && <span className="holiday-badge" title={holidayName}>🎉</span>}
+                        <div className="day-badges">
+                          {hasPending && <span className="pending-badge" title="Modifica non ancora salvata">●</span>}
+                          {holidayName && <span className="holiday-badge" title={holidayName}>🎉</span>}
+                        </div>
                       </div>
                       {turn ? (
                         <div className="turn-badge">{turn.tecnicoAssegnato}</div>
-                      ) : (isWeekend || holidayName) ? (
-                        <button className="add-preference-btn" onClick={(e) => { e.stopPropagation(); setSelectedDate(day.toISOString().split('T')[0]); setShowPreferenceModal(true); }}>+</button>
+                      ) : canEditPreference ? (
+                        <button className="add-preference-btn" onClick={(e) => { e.stopPropagation(); handleOpenPreferenceModal(day); }}>+</button>
                       ) : null}
                     </div>
                   )
                 })}
+              </div>
+            </div>
+            <div className="calendar-bulk-actions">
+              <div className="bulk-info">
+                {pendingPreferenceCount > 0 ? `${pendingPreferenceCount} modifiche locali da salvare` : 'Nessuna modifica locale in sospeso'}
+              </div>
+              <div className="bulk-buttons">
+                {pendingPreferenceCount > 0 && (
+                  <button className="secondary-action" disabled={savingPreferences} onClick={handleDiscardLocalPreferences}>↩️ Annulla modifiche</button>
+                )}
+                <button className="danger-action" disabled={savingPreferences} onClick={handleClearAllPreferences}>🗑️ Cancella tutte le preferenze</button>
+                <button className="success-action" disabled={savingPreferences || pendingPreferenceCount === 0} onClick={handleSaveAllPreferences}>✅ Salva tutte le preferenze</button>
               </div>
             </div>
           </div>
@@ -432,16 +630,18 @@ function App() {
         {activeTab === 'preferences' && (
           <div className="preferences-view">
             <h2>🎨 Le Tue Preferenze</h2>
-            <p className="info-text">Imposta le tue preferenze per i turni</p>
+            <p className="info-text">Imposta le tue preferenze per sabati, domeniche e festivi. Le modifiche restano locali finché non premi “Salva tutte le preferenze”.</p>
             <div className="preferences-grid">
-              {days.filter(d => d && (d.getDay() === 0 || d.getDay() === 6)).slice(0, 10).map((day, idx) => {
+              {days.filter(d => d && (d.getDay() === 0 || d.getDay() === 6 || isHoliday(d))).map((day, idx) => {
                 if (!day) return null
                 const pref = getPreferenceForDate(day)
+                const dateStr = formatLocalDate(day)
+                const hasPending = Object.prototype.hasOwnProperty.call(pendingPreferences, dateStr)
                 return (
-                  <div key={idx} className={`preference-card ${pref ? pref.toLowerCase() : ''}`}>
+                  <div key={idx} className={`preference-card ${pref ? pref.toLowerCase() : ''} ${hasPending ? 'pending-pref' : ''}`}>
                     <div className="preference-date">{day.toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' })}</div>
-                    <div className="preference-value">{pref || 'Non impostata'}</div>
-                    <button onClick={() => { setSelectedDate(day.toISOString().split('T')[0]); setShowPreferenceModal(true); }}>Modifica</button>
+                    <div className="preference-value">{pref || 'Non impostata'}{hasPending ? ' · da salvare' : ''}</div>
+                    <button onClick={() => handleOpenPreferenceModal(day)}>Modifica</button>
                   </div>
                 )
               })}
@@ -467,7 +667,7 @@ function App() {
                     <td>{user.email}</td>
                     <td><span className={`status ${user.stato.toLowerCase()}`}>{user.stato}</span></td>
                     <td>{user.punti}</td>
-                    <td>{user.ultimoTurno ? new Date(user.ultimoTurno).toLocaleDateString('it-IT') : '-'}</td>
+                    <td>{user.ultimoTurno ? parseLocalDate(user.ultimoTurno).toLocaleDateString('it-IT') : '-'}</td>
                     {currentUser.isManager && (
                       <td>
                         <button className="toggle-btn" onClick={() => handleToggleUserStatus(user)}>{user.stato === 'ON' ? '⏸️' : '▶️'}</button>
@@ -492,9 +692,9 @@ function App() {
                 <tr><th>Data</th><th>Giorno</th><th>Tipo</th><th>Tecnico</th><th>Punti</th>{currentUser.isManager && <th>Azioni</th>}</tr>
               </thead>
               <tbody>
-                {turns.filter(t => t.statoTurno === 'ASSEGNATO').sort((a, b) => new Date(a.data).getTime() - new Date(b.data).getTime()).map(turn => (
+                {turns.filter(t => t.statoTurno === 'ASSEGNATO').sort((a, b) => parseLocalDate(a.data).getTime() - parseLocalDate(b.data).getTime()).map(turn => (
                   <tr key={turn.data}>
-                    <td>{new Date(turn.data).toLocaleDateString('it-IT')}</td>
+                    <td>{parseLocalDate(turn.data).toLocaleDateString('it-IT')}</td>
                     <td>{turn.giorno}</td>
                     <td><span className={`turn-type ${turn.tipoGiorno.toLowerCase()}`}>{turn.tipoGiorno}</span></td>
                     <td>{turn.tecnicoAssegnato}</td>
@@ -589,16 +789,16 @@ function App() {
         <div className="modal-overlay" onClick={() => setShowPreferenceModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <h3>🎨 Preferenza</h3>
-            <p className="modal-date">{selectedDate ? new Date(selectedDate).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' }) : ''}</p>
+            <p className="modal-date">{selectedDate ? parseLocalDate(selectedDate).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' }) : ''}</p>
             <div className="preference-options">
-              <button className={`pref-option verde ${selectedPreference === 'VERDE' ? 'selected' : ''}`} onClick={() => setSelectedPreference('VERDE')}>🟩 Verde</button>
-              <button className={`pref-option bianco ${selectedPreference === 'BIANCO' ? 'selected' : ''}`} onClick={() => setSelectedPreference('BIANCO')}>⬜ Bianco</button>
-              <button className={`pref-option giallo ${selectedPreference === 'GIALLO' ? 'selected' : ''}`} onClick={() => setSelectedPreference('GIALLO')}>🟨 Giallo</button>
-              <button className={`pref-option rosso ${selectedPreference === 'ROSSO' ? 'selected' : ''}`} onClick={() => setSelectedPreference('ROSSO')}>🟥 Rosso</button>
+              <button type="button" className={`pref-option verde ${selectedPreference === 'VERDE' ? 'selected' : ''}`} onClick={() => setSelectedPreference('VERDE')}>🟩 Verde</button>
+              <button type="button" className={`pref-option bianco ${selectedPreference === 'BIANCO' ? 'selected' : ''}`} onClick={() => setSelectedPreference('BIANCO')}>⬜ Bianco</button>
+              <button type="button" className={`pref-option giallo ${selectedPreference === 'GIALLO' ? 'selected' : ''}`} onClick={() => setSelectedPreference('GIALLO')}>🟨 Giallo</button>
+              <button type="button" className={`pref-option rosso ${selectedPreference === 'ROSSO' ? 'selected' : ''}`} onClick={() => setSelectedPreference('ROSSO')}>🟥 Rosso</button>
             </div>
             <div className="modal-actions">
               <button type="button" onClick={() => setShowPreferenceModal(false)}>Annulla</button>
-              <button type="button" className="primary" onClick={handleSetPreference}>Salva</button>
+              <button type="button" className="primary" onClick={handleSetPreference}>Aggiungi alle modifiche</button>
             </div>
           </div>
         </div>
