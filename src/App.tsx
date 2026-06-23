@@ -404,7 +404,12 @@ function App() {
                     <div
                       key={index}
                       className={`calendar-day ${isToday ? 'today' : ''} ${turn ? 'has-turn' : ''} ${holidayName ? 'holiday' : ''} ${pref ? `pref-${pref.toLowerCase()}` : ''}`}
-                      onDoubleClick={() => (isWeekend || holidayName) && !turn && setShowPreferenceModal(true)}
+                      onDoubleClick={() => {
+                        if ((isWeekend || holidayName) && !turn) {
+                          setSelectedDate(day.toISOString().split('T')[0])
+                          setShowPreferenceModal(true)
+                        }
+                      }}
                     >
                       <div className="day-header">
                         <span className="day-number">{day.getDate()}</span>
