@@ -2,9 +2,6 @@
  * Algoritmo.gs - Assegnazione Automatica Turni
  */
 
-/**
- * Calcola turni automatici (INTERNAL)
- */
 function Algoritmo_calculateTurniAutomaticiInternal(userId) {
   try {
     const config = getConfigData();
@@ -28,14 +25,14 @@ function Algoritmo_calculateTurniAutomaticiInternal(userId) {
       const result = assegnaTurno(turno, users, prefResult.preferences || [], config);
 
       if (result.success) {
-        // Aggiungi turno al calendario
         Calendario_addTurnInternal({
           data: turno.data,
           idTecnico: result.idTecnico,
           tecnicoNome: result.tecnicoNome,
           tipoGiorno: turno.tipoGiorno,
           punti: result.punti,
-          note: 'Assegnazione automatica'
+          note: 'Assegnazione automatica',
+          skipPointsUpdate: true
         }, userId);
 
         assegnazioni++;
@@ -48,15 +45,13 @@ function Algoritmo_calculateTurniAutomaticiInternal(userId) {
       }
     }
 
+    Algoritmo_updatePointsInternal(userId);
     return { success: true, assegnazioni: assegnazioni, anomalie: anomalie };
   } catch (error) {
     return { success: false, error: error.toString() };
   }
 }
 
-/**
- * Aggiorna punti (INTERNAL)
- */
 function Algoritmo_updatePointsInternal(userId) {
   try {
     const usersSheet = getSheetOrInit('Anagrafica');
@@ -65,36 +60,42 @@ function Algoritmo_updatePointsInternal(userId) {
     const users = getDataRows(usersSheet);
     const storico = getDataRows(storicoSheet);
 
-    // Calcola punti totali per utente
     const puntiPerUtente = {};
+    const ultimoTurnoPerUtente = {};
+
     for (const row of storico) {
+      const dataTurno = row[1] ? formatDate(row[1]) : '';
       const idTecnico = row[2];
       const punti = parseFloat(row[5]) || 0;
+      if (!idTecnico) continue;
+
       puntiPerUtente[idTecnico] = (puntiPerUtente[idTecnico] || 0) + punti;
+
+      if (dataTurno) {
+        if (!ultimoTurnoPerUtente[idTecnico] || dataTurno > ultimoTurnoPerUtente[idTecnico]) {
+          ultimoTurnoPerUtente[idTecnico] = dataTurno;
+        }
+      }
     }
 
-    // Aggiorna foglio anagrafica
-    for (let i = 1; i < users.length; i++) {
+    for (let i = 0; i < users.length; i++) {
       const id = users[i][0];
+      const sheetRow = i + 2;
       const puntiTotali = puntiPerUtente[id] || 0;
-      usersSheet.getRange(i + 1, 6).setValue(puntiTotali);
+      usersSheet.getRange(sheetRow, 6).setValue(puntiTotali);
+      usersSheet.getRange(sheetRow, 7).setValue(ultimoTurnoPerUtente[id] || '');
     }
 
     logAction('ALGORITMO', 'UPDATE_POINTS', '', userId, 'Punti aggiornati per tutti gli utenti');
-
     return { success: true, message: 'Punti aggiornati' };
   } catch (error) {
     return { success: false, error: error.toString() };
   }
 }
 
-/**
- * Assegna singolo turno
- */
 function assegnaTurno(turno, users, preferences, config) {
   const turnoDate = new Date(turno.data);
 
-  // Fase 1: Filtro esclusione
   let candidati = users.filter(u => {
     if (u.stato === 'OFF') return false;
     if (u.ultimoTurno) {
@@ -108,7 +109,6 @@ function assegnaTurno(turno, users, preferences, config) {
     return { success: false, motivo: 'Nessun tecnico disponibile (tutti OFF o in pausa)' };
   }
 
-  // Fase 2: Controllo preferenze (ROSSO = escluso)
   const preferenza = getPreferenzaPerData(candidati, turno.data, preferences);
   candidati = candidati.filter(u => preferenza[u.id] !== 'ROSSO');
 
@@ -116,7 +116,6 @@ function assegnaTurno(turno, users, preferences, config) {
     return { success: false, motivo: 'Tutti i tecnici hanno preferito ROSSO' };
   }
 
-  // Fase 3: Punteggio virtuale
   const punteggiVirtuali = candidati.map(u => {
     const pref = preferenza[u.id] || 'BIANCO';
     let bonusMalus = 0;
@@ -130,11 +129,9 @@ function assegnaTurno(turno, users, preferences, config) {
     };
   });
 
-  // Ordina per punteggio virtuale
   punteggiVirtuali.sort((a, b) => a.puntiVirtuali - b.puntiVirtuali);
   const vincitore = punteggiVirtuali[0];
 
-  // Calcola punti
   let punti = 0;
   if (turno.tipoGiorno === 'FESTIVO') punti = config.puntiFestivo;
   else if (turno.tipoGiorno === 'DOMENICA') punti = config.puntiDomenica;
@@ -151,9 +148,6 @@ function assegnaTurno(turno, users, preferences, config) {
   };
 }
 
-/**
- * Ottieni preferenza per data
- */
 function getPreferenzaPerData(users, data, preferences) {
   const result = {};
   if (!data) {
@@ -168,9 +162,6 @@ function getPreferenzaPerData(users, data, preferences) {
   return result;
 }
 
-/**
- * Config dati
- */
 function getConfigData() {
   return {
     pausaMinima: 30,
@@ -180,9 +171,6 @@ function getConfigData() {
   };
 }
 
-/**
- * Giorni tra due date
- */
 function daysBetween(date1, date2) {
   const oneDay = 24 * 60 * 60 * 1000;
   return Math.round(Math.abs((date2 - date1) / oneDay));
