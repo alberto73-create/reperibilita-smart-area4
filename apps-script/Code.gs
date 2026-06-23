@@ -57,7 +57,7 @@ function doPost(e) {
   const token = e.parameter.token;
 
   try {
-    const data = JSON.parse(e.postData.contents);
+    const data = JSON.parse(e.postData.contents || '{}');
     
     // Ottieni userId dal token (più sicuro che prenderlo dal body)
     const userId = getUserIdFromToken(token);
@@ -79,6 +79,8 @@ function doPost(e) {
 
       // Preferenze
       case 'setPreference': return jsonResponse(Preferenze_setPreference(data, userId));
+      case 'setPreferencesBatch': return jsonResponse(Preferenze_setPreferencesBatch(data, userId));
+      case 'clearPreferencesForUser': return jsonResponse(Preferenze_clearPreferencesForUser(data, userId));
 
       // Algoritmo
       case 'calculateTurni': return jsonResponse(Algoritmo_calculateTurniAutomatici(userId));
@@ -186,6 +188,14 @@ function Preferenze_getPreferences() {
 
 function Preferenze_setPreference(data, userId) {
   return Preferenze_setPreferenceInternal(data, userId);
+}
+
+function Preferenze_setPreferencesBatch(data, userId) {
+  return Preferenze_setPreferencesBatchInternal(data, userId);
+}
+
+function Preferenze_clearPreferencesForUser(data, userId) {
+  return Preferenze_clearPreferencesForUserInternal(data, userId);
 }
 
 // ==================== WRAPPERS - Log ====================
