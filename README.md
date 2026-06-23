@@ -113,8 +113,12 @@ Ogni utente può impostare preferenze per i turni:
 
 1. Crea nuovo foglio Google
 2. Estensioni → Apps Script
-3. Copia **TUTTI** i file da `apps-script/`
-4. Esegui `initTutto()` una volta sola
+3. Copia il contenuto di `apps-script/01_FORMATTA_FOGLIO.gs` in `Code.gs`
+4. Esegui `formattaFoglioReperibilitaArea4()` per creare e formattare i tab
+5. Sostituisci il codice con `apps-script/Code.gs.COMPLETO.js`
+6. Esegui `initTutto()` una volta sola
+
+Per la procedura completa passo-passo usa `GUIDA-AVVIO-GOOGLE-SHEETS.md`.
 
 ### Passo 2: Deploy API
 
@@ -127,7 +131,7 @@ Ogni utente può impostare preferenze per i turni:
 
 1. `npm i -g vercel`
 2. `vercel` (nella cartella progetto)
-3. Imposta env var: `VITE_APPS_SCRIPT_URL`
+3. Imposta env var: `APPS_SCRIPT_URL`
 4. `vercel --prod`
 
 ### Passo 4: Login

@@ -6,9 +6,9 @@
 2. Clicca su **+ Vuoto**
 3. **Estensioni** → **Apps Script**
 4. **Cancella tutto** il codice presente
-5. **Copia e incolla** il file `apps-script/SETUP-FOGLIO.gs`
+5. **Copia e incolla** il file `apps-script/01_FORMATTA_FOGLIO.gs`
 6. Clicca su **Salva** (💾)
-7. Clicca su **Esegui** (▶️)
+7. Seleziona la funzione `formattaFoglioReperibilitaArea4` e clicca su **Esegui** (▶️)
 8. **Autorizza** l'accesso (se richiesto)
 9. **Rispondi OK** all'avviso di successo
 
@@ -23,7 +23,7 @@
 ## Passo 2: Apps Script API (3 min)
 
 1. Sempre in Apps Script, **cancella tutto** di nuovo
-2. **Copia e incolla** il file `apps-script/Code.gs`
+2. **Copia e incolla** il file `apps-script/Code.gs.COMPLETO.js`
 3. Clicca su **Salva** (💾)
 4. Dai il nome: `Reperibilità API`
 5. **Deploy** → **Nuova distribuzione**
@@ -47,7 +47,7 @@
 
 Contenuto di `.env.local`:
 ```env
-VITE_APPS_SCRIPT_URL=https://script.google.com/macros/s/IL_TUO_ID_COPIATO/exec
+APPS_SCRIPT_URL=https://script.google.com/macros/s/IL_TUO_ID_COPIATO/exec
 ```
 
 ---
@@ -81,7 +81,7 @@ vercel
 ```
 
 Nel dashboard Vercel aggiungi:
-- `VITE_APPS_SCRIPT_URL` = il tuo URL
+- `APPS_SCRIPT_URL` = il tuo URL
 
 ---
 
