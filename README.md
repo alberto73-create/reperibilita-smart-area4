@@ -120,6 +120,8 @@ Ogni utente può impostare preferenze per i turni:
 
 Per la procedura completa passo-passo usa `GUIDA-AVVIO-GOOGLE-SHEETS.md`.
 
+Per la procedura completa passo-passo usa `GUIDA-AVVIO-GOOGLE-SHEETS.md`.
+
 ### Passo 2: Deploy API
 
 1. Deploy → Nuova distribuzione → App Web
