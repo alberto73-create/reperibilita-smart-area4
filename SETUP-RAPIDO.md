@@ -6,9 +6,9 @@
 2. Clicca su **+ Vuoto**
 3. **Estensioni** → **Apps Script**
 4. **Cancella tutto** il codice presente
-5. **Copia e incolla** il file `apps-script/SETUP-FOGLIO.gs`
+5. **Copia e incolla** il file `apps-script/01_FORMATTA_FOGLIO.gs`
 6. Clicca su **Salva** (💾)
-7. Clicca su **Esegui** (▶️)
+7. Seleziona la funzione `formattaFoglioReperibilitaArea4` e clicca su **Esegui** (▶️)
 8. **Autorizza** l'accesso (se richiesto)
 9. **Rispondi OK** all'avviso di successo
 

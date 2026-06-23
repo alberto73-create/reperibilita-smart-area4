@@ -19,7 +19,31 @@ Quello che puoi fare tu è seguire i passaggi qui sotto: sono pensati per essere
 
 ---
 
-## 2. Incolla lo script completo Apps Script
+## 2. Prima formatta il foglio
+
+Nel progetto Apps Script:
+
+1. Cancella tutto il codice già presente in `Code.gs`.
+2. Copia tutto il contenuto del file del repository:
+
+```text
+apps-script/01_FORMATTA_FOGLIO.gs
+```
+
+3. Incollalo in `Code.gs` dentro Apps Script.
+4. Clicca **Salva**.
+5. Come nome progetto puoi usare: `01 - Formatta foglio reperibilità`.
+6. Esegui la funzione `formattaFoglioReperibilitaArea4`.
+
+Il Google Sheet verrà rinominato automaticamente in:
+
+```text
+Reperibilità Smart - Area 4
+```
+
+---
+
+## 3. Poi incolla lo script completo Apps Script
 
 Nel progetto Apps Script:
 
@@ -38,7 +62,7 @@ apps-script/Code.gs.COMPLETO.js
 
 ---
 
-## 3. Inizializza i fogli
+## 4. Inizializza i fogli
 
 1. Nel menu in alto di Apps Script seleziona la funzione `initTutto`.
 2. Clicca **Esegui**.
@@ -65,7 +89,7 @@ Cambia i PIN appena hai verificato che tutto funziona.
 
 ---
 
-## 4. Pubblica Apps Script come API web
+## 5. Pubblica Apps Script come API web
 
 1. In Apps Script clicca **Deploy → Nuova distribuzione**.
 2. Clicca sull'icona ingranaggio e scegli **App Web**.
@@ -89,7 +113,7 @@ Questo URL è il valore da usare come `APPS_SCRIPT_URL`.
 
 ---
 
-## 5. Configura l'app in locale
+## 6. Configura l'app in locale
 
 Nel repository crea o aggiorna il file `.env.local` nella root del progetto:
 
@@ -114,7 +138,7 @@ http://localhost:5173
 
 ---
 
-## 6. Login di prova
+## 7. Login di prova
 
 Prova prima come manager:
 
@@ -127,7 +151,7 @@ Se entra, il collegamento app → proxy → Apps Script → Google Sheet sta fun
 
 ---
 
-## 7. Configura Vercel in produzione
+## 8. Configura Vercel in produzione
 
 Nel dashboard Vercel del progetto aggiungi questa variabile d'ambiente:
 
@@ -146,7 +170,7 @@ vercel --prod
 
 ---
 
-## 8. Test rapido dell'API senza frontend
+## 9. Test rapido dell'API senza frontend
 
 Puoi provare l'endpoint Apps Script direttamente nel browser:
 
@@ -178,7 +202,7 @@ https://script.google.com/macros/s/XXXXXXXXXXXXXXXXXXXXXXXX/exec?action=getUsers
 
 ---
 
-## 9. Problemi comuni
+## 10. Problemi comuni
 
 | Problema | Causa probabile | Soluzione |
 | --- | --- | --- |
@@ -187,15 +211,16 @@ https://script.google.com/macros/s/XXXXXXXXXXXXXXXXXXXXXXXX/exec?action=getUsers
 | Login fallito | Dati non inizializzati o PIN cambiato | Esegui `initTutto` e prova `manager@azienda.com` / `0000` |
 | Schermata errore nel frontend | Apps Script non raggiungibile | Testa prima l'URL diretto nel browser |
 | Modifiche Apps Script non visibili | Deploy non aggiornato | In Apps Script crea una nuova distribuzione o modifica quella esistente con nuova versione |
+| `Foglio non trovato: undefined` | Hai eseguito una funzione sbagliata, di solito `getSheet`, invece della funzione di setup | Seleziona ed esegui `formattaFoglioReperibilitaArea4` per formattare il foglio, oppure `initTutto` dopo aver incollato lo script completo |
 
 ---
 
-## 10. File utili nel repository
+## 11. File utili nel repository
 
 | File | Quando usarlo |
 | --- | --- |
+| `apps-script/01_FORMATTA_FOGLIO.gs` | Primo script da incollare per creare e formattare il Google Sheet |
 | `apps-script/Code.gs.COMPLETO.js` | Copia/incolla unico consigliato dentro Apps Script |
 | `apps-script/modules/*.gs` + `apps-script/Code.gs` | Variante modulare se vuoi gestire i file separati manualmente |
 | `SETUP-RAPIDO.md` | Guida sintetica |
 | `README.md` | Descrizione generale del progetto |
-
