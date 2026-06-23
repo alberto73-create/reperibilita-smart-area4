@@ -1,16 +1,26 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import type { FormEvent } from 'react'
 import './App.css'
 import './prefs-bulk.css'
 import type { User, Turn, Preference, Holiday, LogEntry, Stats } from './types'
 import {
   login as apiLogin,
   getUsers, getTurns, getPreferences, getLog, getStats, getHolidays,
-  addUser, setUserStatus, addTurn, deleteTurn, setPreference, setPreferencesBatch, clearPreferencesForUser,
+  addUser, updateUser, setUserStatus, addTurn, deleteTurn, setPreference, setPreferencesBatch, clearPreferencesForUser,
   calculateTurniAutomatici, updatePoints, changePin, resetPin
 } from '../lib/api'
 
 type PreferenceColor = 'VERDE' | 'BIANCO' | 'GIALLO' | 'ROSSO'
 type PendingPreferences = Record<string, PreferenceColor>
+type ActiveTab = 'calendar' | 'users' | 'turns' | 'preferences' | 'manager' | 'log'
+
+type CurrentUser = {
+  id: string
+  email: string
+  ruolo: string
+  nome: string
+  isManager: boolean
+}
 
 type CachedAppData = {
   users: User[]
@@ -32,22 +42,34 @@ const parseLocalDate = (value: string) => {
   return new Date(year, month - 1, day)
 }
 
+const monthDiffFromToday = (date: Date) => {
+  const today = new Date()
+  return (date.getFullYear() - today.getFullYear()) * 12 + date.getMonth() - today.getMonth()
+}
+
+const addMonths = (base: Date, months: number) => {
+  return new Date(base.getFullYear(), base.getMonth() + months, 1)
+}
+
+const getDefaultMonthForUser = (user?: CurrentUser | null) => {
+  const today = new Date()
+  if (user?.isManager) return new Date(today.getFullYear(), today.getMonth(), 1)
+  return addMonths(today, today.getDate() <= 15 ? 1 : 2)
+}
+
 const cacheKeyForUser = (userId: string) => `reperibilita_cache_${userId}`
 const draftKeyForUser = (userId: string) => `reperibilita_preference_drafts_${userId}`
 
 function App() {
-  // Auth State
   const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [currentUser, setCurrentUser] = useState<any>(null)
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null)
 
-  // Login Form
   const [loginEmail, setLoginEmail] = useState('')
   const [loginPin, setLoginPin] = useState('')
   const [loginError, setLoginError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  
-  // App State
-  const [activeTab, setActiveTab] = useState<'calendar' | 'users' | 'turns' | 'preferences' | 'manager' | 'log'>('calendar')
+
+  const [activeTab, setActiveTab] = useState<ActiveTab>('calendar')
   const [users, setUsers] = useState<User[]>([])
   const [turns, setTurns] = useState<Turn[]>([])
   const [preferences, setPreferences] = useState<Preference[]>([])
@@ -56,25 +78,24 @@ function App() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [lastCacheAt, setLastCacheAt] = useState<string>('')
-  
-  // Calendar
-  const [currentMonth, setCurrentMonth] = useState(new Date())
-  
-  // Modals
+
+  const [currentMonth, setCurrentMonth] = useState(getDefaultMonthForUser(null))
+
   const [showUserModal, setShowUserModal] = useState(false)
   const [showTurnModal, setShowTurnModal] = useState(false)
   const [showPinModal, setShowPinModal] = useState(false)
+  const [showPreferenceModal, setShowPreferenceModal] = useState(false)
+
   const [newUser, setNewUser] = useState({ nome: '', cognome: '', email: '' })
   const [selectedDate, setSelectedDate] = useState<string>('')
   const [selectedUser, setSelectedUser] = useState<string>('')
   const [turnNotes, setTurnNotes] = useState('')
-  
-  // Preference
-  const [showPreferenceModal, setShowPreferenceModal] = useState(false)
   const [selectedPreference, setSelectedPreference] = useState<PreferenceColor>('BIANCO')
   const [pendingPreferences, setPendingPreferences] = useState<PendingPreferences>({})
   const [savingPreferences, setSavingPreferences] = useState(false)
   const [pinToChange, setPinToChange] = useState({ userId: '', newPin: '' })
+
+  const activeUsers = useMemo(() => users.filter(u => u.stato === 'ON'), [users])
 
   const persistPendingPreferences = (userId: string, next: PendingPreferences) => {
     setPendingPreferences(next)
@@ -117,7 +138,6 @@ function App() {
     }
   }
 
-  // Load Data
   const loadData = async (userIdForCache?: string) => {
     const cacheUserId = userIdForCache || currentUser?.id
     try {
@@ -129,6 +149,7 @@ function App() {
         getHolidays(),
         getStats()
       ])
+
       setUsers(usersData)
       setTurns(turnsData)
       setPreferences(preferencesData)
@@ -160,36 +181,34 @@ function App() {
     }
   }
 
-  // Login
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleLogin = async (e: FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
     setLoginError('')
-    
+
     try {
       const result = await apiLogin(loginEmail, loginPin)
-      
-      if (result.success) {
+
+      if (result.success && result.user) {
+        const user = result.user as CurrentUser
         setIsAuthenticated(true)
-        setCurrentUser(result.user)
+        setCurrentUser(user)
+        setCurrentMonth(getDefaultMonthForUser(user))
         localStorage.setItem('auth_token', result.token || '')
-        localStorage.setItem('current_user', JSON.stringify(result.user))
-        if (result.user?.id) {
-          hydrateCachedData(result.user.id)
-          hydrateDraftPreferences(result.user.id)
-        }
-        loadData(result.user?.id)
+        localStorage.setItem('current_user', JSON.stringify(user))
+        hydrateCachedData(user.id)
+        hydrateDraftPreferences(user.id)
+        loadData(user.id)
       } else {
         setLoginError(result.error || 'Login fallito')
       }
-    } catch (err) {
+    } catch {
       setLoginError('Errore di connessione')
     } finally {
       setIsLoading(false)
     }
   }
 
-  // Logout
   const handleLogout = () => {
     setIsAuthenticated(false)
     setCurrentUser(null)
@@ -198,15 +217,15 @@ function App() {
     localStorage.removeItem('current_user')
   }
 
-  // Check saved session
   useEffect(() => {
     const savedToken = localStorage.getItem('auth_token')
     const savedUser = localStorage.getItem('current_user')
-    
+
     if (savedToken && savedUser) {
-      const parsedUser = JSON.parse(savedUser)
+      const parsedUser = JSON.parse(savedUser) as CurrentUser
       setCurrentUser(parsedUser)
       setIsAuthenticated(true)
+      setCurrentMonth(getDefaultMonthForUser(parsedUser))
       hydrateCachedData(parsedUser.id)
       hydrateDraftPreferences(parsedUser.id)
       loadData(parsedUser.id)
@@ -215,71 +234,218 @@ function App() {
     }
   }, [])
 
-  // User Actions
-  const handleAddUser = async (e: React.FormEvent) => {
+  const getDaysInMonth = (date: Date) => {
+    const year = date.getFullYear()
+    const month = date.getMonth()
+    const firstDay = new Date(year, month, 1)
+    const lastDay = new Date(year, month + 1, 0)
+
+    let startingDay = firstDay.getDay()
+    startingDay = startingDay === 0 ? 6 : startingDay - 1
+
+    const monthDays: (Date | null)[] = []
+    for (let i = 0; i < startingDay; i++) monthDays.push(null)
+    for (let day = 1; day <= lastDay.getDate(); day++) {
+      monthDays.push(new Date(year, month, day))
+    }
+    return monthDays
+  }
+
+  const isAssignedTurn = (turn: Turn | undefined) => {
+    return Boolean(turn && turn.statoTurno === 'ASSEGNATO' && turn.tecnicoAssegnato)
+  }
+
+  const getTurnForDate = (date: Date) => {
+    const dateStr = formatLocalDate(date)
+    return turns.find(t => t.data === dateStr && isAssignedTurn(t))
+  }
+
+  const isHoliday = (date: Date): string | null => {
+    const dateStr = formatLocalDate(date)
+    const holiday = holidays.find(h => h.data === dateStr)
+    return holiday ? holiday.nome : null
+  }
+
+  const isPreferenceDay = (date: Date) => {
+    return date.getDay() === 0 || date.getDay() === 6 || Boolean(isHoliday(date))
+  }
+
+  const getPreferencePolicy = (date: Date) => {
+    if (currentUser?.isManager) {
+      return { visible: true, editable: true, reason: 'Manager: modifica sempre consentita' }
+    }
+
+    const diff = monthDiffFromToday(date)
+    const today = new Date()
+
+    if (diff < 1 || diff > 2) {
+      return {
+        visible: false,
+        editable: false,
+        reason: 'Gli utenti possono gestire solo i prossimi 2 mesi.'
+      }
+    }
+
+    if (diff === 1 && today.getDate() > 15) {
+      return {
+        visible: true,
+        editable: false,
+        reason: 'Mese congelato: le preferenze si chiudono il 15 del mese precedente.'
+      }
+    }
+
+    return { visible: true, editable: true, reason: 'Preferenza modificabile.' }
+  }
+
+  const getPreferenceForDate = (date: Date | null): string | null => {
+    if (!date) return null
+    const dateStr = formatLocalDate(date)
+
+    if (Object.prototype.hasOwnProperty.call(pendingPreferences, dateStr)) {
+      return pendingPreferences[dateStr]
+    }
+
+    const pref = preferences.find(p => p.idTecnico === currentUser?.id && p.data === dateStr)
+    return pref ? pref.preferenza : null
+  }
+
+  const getTipoGiornoForDate = (dateStr: string) => {
+    const date = parseLocalDate(dateStr)
+    if (isHoliday(date)) return 'FESTIVO'
+    if (date.getDay() === 0) return 'DOMENICA'
+    if (date.getDay() === 6) return 'SABATO'
+    return 'FERIALE'
+  }
+
+  const getPointsForDate = (dateStr: string) => {
+    const tipo = getTipoGiornoForDate(dateStr)
+    if (tipo === 'FESTIVO') return 3
+    return 1
+  }
+
+  const canNavigateMonth = (delta: number) => {
+    if (currentUser?.isManager) return true
+    const nextMonth = addMonths(currentMonth, delta)
+    const diff = monthDiffFromToday(nextMonth)
+    return diff >= 0 && diff <= 2
+  }
+
+  const navigateMonth = (delta: number) => {
+    if (!canNavigateMonth(delta)) return
+    setCurrentMonth(addMonths(currentMonth, delta))
+  }
+
+  const handleAddUser = async (e: FormEvent) => {
     e.preventDefault()
+    if (!currentUser?.isManager) return
     try {
       await addUser({ ...newUser, stato: 'ON', dataAssunzione: '', note: '' })
       setNewUser({ nome: '', cognome: '', email: '' })
       setShowUserModal(false)
       loadData()
     } catch (err) {
-      alert('Errore nell\'aggiunta utente')
+      alert('Errore nell\'aggiunta utente: ' + (err instanceof Error ? err.message : 'errore sconosciuto'))
     }
   }
 
   const handleToggleUserStatus = async (user: User) => {
+    if (!currentUser?.isManager) return
     if (!confirm(`Cambiare stato a ${user.nome} da ${user.stato} a ${user.stato === 'ON' ? 'OFF' : 'ON'}?`)) return
     try {
       await setUserStatus(user.id, user.stato === 'ON' ? 'OFF' : 'ON', 'Cambio manuale')
       loadData()
     } catch (err) {
-      alert('Errore')
+      alert('Errore: ' + (err instanceof Error ? err.message : 'errore sconosciuto'))
     }
   }
 
-  // Turn Actions
-  const handleAddTurn = async (e: React.FormEvent) => {
+  const handleManualUserPoints = async (user: User) => {
+    if (!currentUser?.isManager) return
+    const value = prompt(`Imposta punteggio totale per ${user.nome} ${user.cognome}`, String(user.punti ?? 0))
+    if (value === null) return
+
+    const points = Number(value.replace(',', '.'))
+    if (!Number.isFinite(points) || points < 0) {
+      alert('Inserisci un punteggio valido.')
+      return
+    }
+
+    try {
+      await updateUser({ id: user.id, punti: points })
+      await loadData()
+      alert('Punteggio aggiornato.')
+    } catch (err) {
+      alert('Errore aggiornamento punti: ' + (err instanceof Error ? err.message : 'errore sconosciuto'))
+    }
+  }
+
+  const handleOpenTurnModal = (date: Date) => {
+    if (!currentUser?.isManager) return
+    const firstUser = activeUsers[0] || users[0]
+    setSelectedDate(formatLocalDate(date))
+    setSelectedUser(firstUser?.id || '')
+    setTurnNotes('Forzatura manuale manager')
+    setShowTurnModal(true)
+  }
+
+  const handleAddTurn = async (e: FormEvent) => {
     e.preventDefault()
+    if (!currentUser?.isManager) return
+
     try {
       const user = users.find(u => u.id === selectedUser)
-      if (!user) return
-      
-      const turnoData = turns.find(t => t.data === selectedDate)
-      const tipoGiorno = turnoData?.tipoGiorno || 'SABATO'
-      const punti = tipoGiorno === 'FESTIVO' ? 3 : 1
-      
+      if (!user) {
+        alert('Seleziona un utente.')
+        return
+      }
+
+      const tipoGiorno = getTipoGiornoForDate(selectedDate)
+      const punti = getPointsForDate(selectedDate)
+
       await addTurn({
         data: selectedDate,
         idTecnico: user.id,
         tecnicoNome: `${user.nome} ${user.cognome}`,
         tipoGiorno,
         punti,
-        note: turnNotes
+        note: turnNotes || 'Forzatura manuale manager'
       })
-      
+
       setShowTurnModal(false)
       setSelectedDate('')
       setSelectedUser('')
       setTurnNotes('')
-      loadData()
+      await loadData()
+      alert('Turno forzato manualmente.')
     } catch (err) {
-      alert('Errore')
+      alert('Errore forzatura turno: ' + (err instanceof Error ? err.message : 'errore sconosciuto'))
     }
   }
 
   const handleDeleteTurn = async (data: string) => {
+    if (!currentUser?.isManager) return
     if (!confirm('Eliminare questo turno?')) return
     try {
       await deleteTurn(data)
-      loadData()
+      await loadData()
     } catch (err) {
-      alert('Errore')
+      alert('Errore: ' + (err instanceof Error ? err.message : 'errore sconosciuto'))
     }
   }
 
-  // Preference Actions
   const handleOpenPreferenceModal = (date: Date) => {
+    const policy = getPreferencePolicy(date)
+
+    if (!isPreferenceDay(date)) {
+      alert('Le preferenze si impostano solo su sabati, domeniche e festivi.')
+      return
+    }
+
+    if (!policy.editable) {
+      alert(policy.reason)
+      return
+    }
+
     const dateStr = formatLocalDate(date)
     const existingPref = getPreferenceForDate(date)
     setSelectedDate(dateStr)
@@ -289,6 +455,12 @@ function App() {
 
   const handleSetPreference = async () => {
     if (!selectedDate || !currentUser?.id) return
+
+    const policy = getPreferencePolicy(parseLocalDate(selectedDate))
+    if (!policy.editable) {
+      alert(policy.reason)
+      return
+    }
 
     const next = {
       ...pendingPreferences,
@@ -306,6 +478,12 @@ function App() {
       return
     }
 
+    const blocked = entries.filter(([data]) => !getPreferencePolicy(parseLocalDate(data)).editable)
+    if (blocked.length > 0) {
+      alert('Ci sono modifiche fuori finestra o bloccate. Annullale e reinserisci solo preferenze valide.')
+      return
+    }
+
     if (!confirm(`Vuoi salvare ${entries.length} preferenze in un unico passaggio?`)) return
 
     const payload = entries.map(([data, preferenza]) => ({
@@ -320,7 +498,6 @@ function App() {
       try {
         await setPreferencesBatch(payload)
       } catch {
-        // Compatibilità con Apps Script non ancora aggiornato: salva comunque, ma solo alla conferma finale.
         for (const preference of payload) {
           await setPreference(preference)
         }
@@ -362,9 +539,8 @@ function App() {
     }
   }
 
-  // Manager Actions
   const handleCalculateTurns = async () => {
-    if (!confirm('Avviare calcolo automatico?')) return
+    if (!confirm('Avviare calcolo automatico per i mesi generati?')) return
     try {
       const result = await calculateTurniAutomatici()
       alert(`Calcolo completato!\nAssegnazioni: ${result.assegnazioni}\nAnomalie: ${result.anomalie.length}`)
@@ -375,7 +551,7 @@ function App() {
   }
 
   const handleUpdatePoints = async () => {
-    if (!confirm('Aggiornare i punti?')) return
+    if (!confirm('Ricalcolare i punti dai turni assegnati?')) return
     try {
       await updatePoints()
       alert('Punti aggiornati!')
@@ -397,74 +573,49 @@ function App() {
       setShowPinModal(false)
       setPinToChange({ userId: '', newPin: '' })
     } catch (err) {
-      alert('Errore')
+      alert('Errore: ' + (err instanceof Error ? err.message : 'errore sconosciuto'))
     }
   }
 
   const handleResetPin = async (userId: string) => {
+    if (!userId) {
+      alert('Seleziona un utente.')
+      return
+    }
     if (!confirm('Resettare il PIN di questo utente?')) return
     try {
       const result = await resetPin(userId)
       alert(`PIN resettato a: ${result.newPin}`)
     } catch (err) {
-      alert('Errore')
+      alert('Errore: ' + (err instanceof Error ? err.message : 'errore sconosciuto'))
     }
-  }
-
-  // Calendar Helpers
-  const getDaysInMonth = (date: Date) => {
-    const year = date.getFullYear()
-    const month = date.getMonth()
-    const firstDay = new Date(year, month, 1)
-    const lastDay = new Date(year, month + 1, 0)
-    
-    let startingDay = firstDay.getDay()
-    startingDay = startingDay === 0 ? 6 : startingDay - 1
-    
-    const monthDays: (Date | null)[] = []
-    for (let i = 0; i < startingDay; i++) monthDays.push(null)
-    for (let day = 1; day <= lastDay.getDate(); day++) {
-      monthDays.push(new Date(year, month, day))
-    }
-    return monthDays
-  }
-
-  const isAssignedTurn = (turn: Turn | undefined) => {
-    return Boolean(turn && turn.statoTurno === 'ASSEGNATO' && turn.tecnicoAssegnato)
-  }
-
-  const getTurnForDate = (date: Date) => {
-    const dateStr = formatLocalDate(date)
-    return turns.find(t => t.data === dateStr && isAssignedTurn(t))
-  }
-  
-  const getPreferenceForDate = (date: Date | null): string | null => {
-    if (!date) return null
-    const dateStr = formatLocalDate(date)
-
-    if (Object.prototype.hasOwnProperty.call(pendingPreferences, dateStr)) {
-      return pendingPreferences[dateStr]
-    }
-
-    const pref = preferences.find(p => p.idTecnico === currentUser?.id && p.data === dateStr)
-    return pref ? pref.preferenza : null
-  }
-
-  const isHoliday = (date: Date): string | null => {
-    const dateStr = formatLocalDate(date)
-    const holiday = holidays.find(h => h.data === dateStr)
-    return holiday ? holiday.nome : null
-  }
-
-  const navigateMonth = (delta: number) => {
-    setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + delta, 1))
   }
 
   const days = getDaysInMonth(currentMonth)
   const monthName = currentMonth.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' })
   const pendingPreferenceCount = Object.keys(pendingPreferences).length
+  const monthDiff = monthDiffFromToday(currentMonth)
 
-  // LOGIN SCREEN
+  const preferenceDays = days
+    .filter((day): day is Date => Boolean(day))
+    .filter(day => isPreferenceDay(day))
+    .filter(day => currentUser?.isManager || getPreferencePolicy(day).visible)
+
+  const BulkActions = () => (
+    <div className="calendar-bulk-actions">
+      <div className="bulk-info">
+        {pendingPreferenceCount > 0 ? `${pendingPreferenceCount} modifiche locali da salvare` : 'Nessuna modifica locale in sospeso'}
+      </div>
+      <div className="bulk-buttons">
+        {pendingPreferenceCount > 0 && (
+          <button className="secondary-action" disabled={savingPreferences} onClick={handleDiscardLocalPreferences}>↩️ Annulla modifiche</button>
+        )}
+        <button className="danger-action" disabled={savingPreferences} onClick={handleClearAllPreferences}>🗑️ Cancella tutte le preferenze</button>
+        <button className="success-action" disabled={savingPreferences || pendingPreferenceCount === 0} onClick={handleSaveAllPreferences}>✅ Salva tutte le preferenze</button>
+      </div>
+    </div>
+  )
+
   if (!isAuthenticated) {
     return (
       <div className="app">
@@ -475,29 +626,14 @@ function App() {
             <form onSubmit={handleLogin}>
               <div className="form-group">
                 <label>Email Aziendale</label>
-                <input
-                  type="email"
-                  value={loginEmail}
-                  onChange={e => setLoginEmail(e.target.value)}
-                  placeholder="nome@azienda.com"
-                  required
-                />
+                <input type="email" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} placeholder="nome@azienda.com" required />
               </div>
               <div className="form-group">
                 <label>PIN (4 cifre)</label>
-                <input
-                  type="password"
-                  maxLength={4}
-                  value={loginPin}
-                  onChange={e => setLoginPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                  placeholder="****"
-                  required
-                />
+                <input type="password" maxLength={4} value={loginPin} onChange={e => setLoginPin(e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="****" required />
               </div>
               {loginError && <p className="error-text">{loginError}</p>}
-              <button type="submit" className="login-btn" disabled={isLoading}>
-                {isLoading ? 'Accesso...' : 'Accedi'}
-              </button>
+              <button type="submit" className="login-btn" disabled={isLoading}>{isLoading ? 'Accesso...' : 'Accedi'}</button>
             </form>
             <div className="login-hints">
               <p><strong>Manager:</strong> manager@azienda.com / PIN: 0000</p>
@@ -509,7 +645,6 @@ function App() {
     )
   }
 
-  // MAIN APP
   if (loading && users.length === 0 && turns.length === 0) {
     return <div className="app"><div className="loading">Caricamento...</div></div>
   }
@@ -532,7 +667,7 @@ function App() {
         <div className="header-top">
           <h1>📅 Reperibilità Smart - Area 4</h1>
           <div className="header-actions">
-            <span className="user-info">👤 {currentUser.nome} ({currentUser.isManager ? 'Manager' : 'Utente'})</span>
+            <span className="user-info">👤 {currentUser?.nome} ({currentUser?.isManager ? 'Manager' : 'Utente'})</span>
             <button onClick={handleLogout} className="logout-btn">Esci</button>
           </div>
         </div>
@@ -541,7 +676,7 @@ function App() {
           <button className={activeTab === 'preferences' ? 'active' : ''} onClick={() => setActiveTab('preferences')}>🎨 Preferenze</button>
           <button className={activeTab === 'users' ? 'active' : ''} onClick={() => setActiveTab('users')}>👥 Utenti</button>
           <button className={activeTab === 'turns' ? 'active' : ''} onClick={() => setActiveTab('turns')}>📋 Turni</button>
-          {currentUser.isManager && (
+          {currentUser?.isManager && (
             <>
               <button className={activeTab === 'manager' ? 'active' : ''} onClick={() => setActiveTab('manager')}>⚙️ Manager</button>
               <button className={activeTab === 'log' ? 'active' : ''} onClick={() => setActiveTab('log')}>📝 Log IA</button>
@@ -551,13 +686,17 @@ function App() {
       </header>
 
       <main className="main">
-        {/* CALENDAR */}
         {activeTab === 'calendar' && (
           <div className="calendar-view">
+            {!currentUser?.isManager && (
+              <p className="window-note">
+                Utente base: calendario limitato a mese corrente + 2 mesi. Le preferenze del mese successivo si congelano dopo il giorno 15.
+              </p>
+            )}
             <div className="calendar-header">
-              <button onClick={() => navigateMonth(-1)}>←</button>
+              <button onClick={() => navigateMonth(-1)} disabled={!canNavigateMonth(-1)}>←</button>
               <h2>{monthName.charAt(0).toUpperCase() + monthName.slice(1)}</h2>
-              <button onClick={() => navigateMonth(1)}>→</button>
+              <button onClick={() => navigateMonth(1)} disabled={!canNavigateMonth(1)}>→</button>
             </div>
             <div className="calendar-legend">
               <span className="legend-item"><span className="legend-color verde"></span> Verde</span>
@@ -565,14 +704,13 @@ function App() {
               <span className="legend-item"><span className="legend-color giallo"></span> Giallo</span>
               <span className="legend-item"><span className="legend-color rosso"></span> Rosso</span>
             </div>
-            {lastCacheAt && (
-              <p className="cache-note">Cache locale attiva · ultimo aggiornamento {new Date(lastCacheAt).toLocaleString('it-IT')}</p>
+            {lastCacheAt && <p className="cache-note">Cache locale attiva · ultimo aggiornamento {new Date(lastCacheAt).toLocaleString('it-IT')}</p>}
+            {!currentUser?.isManager && monthDiff === 1 && new Date().getDate() > 15 && (
+              <p className="lock-note">🔒 Questo mese è congelato per gli utenti base. Il manager può ancora forzare i turni.</p>
             )}
             <div className="calendar-grid">
               <div className="calendar-weekdays">
-                {['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'].map(day => (
-                  <div key={day} className="weekday">{day}</div>
-                ))}
+                {['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'].map(day => <div key={day} className="weekday">{day}</div>)}
               </div>
               <div className="calendar-days">
                 {days.map((day, index) => {
@@ -583,83 +721,87 @@ function App() {
                   const pref = getPreferenceForDate(day)
                   const dateStr = formatLocalDate(day)
                   const hasPending = Object.prototype.hasOwnProperty.call(pendingPreferences, dateStr)
-                  const isWeekend = day.getDay() === 0 || day.getDay() === 6
-                  const canEditPreference = isWeekend || holidayName
+                  const isRelevantDay = isPreferenceDay(day)
+                  const policy = getPreferencePolicy(day)
+                  const canEditPreference = isRelevantDay && policy.editable && !turn
+                  const locked = isRelevantDay && policy.visible && !policy.editable && !currentUser?.isManager
+
                   return (
                     <div
                       key={index}
-                      className={`calendar-day ${isToday ? 'today' : ''} ${turn ? 'has-turn' : ''} ${holidayName ? 'holiday' : ''} ${pref ? `pref-${pref.toLowerCase()}` : ''} ${hasPending ? 'pending-pref' : ''}`}
+                      className={`calendar-day ${isToday ? 'today' : ''} ${turn ? 'has-turn' : ''} ${holidayName ? 'holiday' : ''} ${pref ? `pref-${pref.toLowerCase()}` : ''} ${hasPending ? 'pending-pref' : ''} ${locked ? 'locked-day' : ''}`}
                       onDoubleClick={() => {
-                        if (canEditPreference && !turn) {
-                          handleOpenPreferenceModal(day)
-                        }
+                        if (currentUser?.isManager && isRelevantDay) handleOpenTurnModal(day)
+                        else if (canEditPreference) handleOpenPreferenceModal(day)
                       }}
                     >
                       <div className="day-header">
                         <span className="day-number">{day.getDate()}</span>
                         <div className="day-badges">
+                          {locked && <span className="lock-badge" title={policy.reason}>🔒</span>}
                           {hasPending && <span className="pending-badge" title="Modifica non ancora salvata">●</span>}
                           {holidayName && <span className="holiday-badge" title={holidayName}>🎉</span>}
                         </div>
                       </div>
-                      {turn ? (
-                        <div className="turn-badge">{turn.tecnicoAssegnato}</div>
+                      {turn && <div className="turn-badge">{turn.tecnicoAssegnato}</div>}
+                      {currentUser?.isManager && isRelevantDay ? (
+                        <button className="force-turn-btn" onClick={(e) => { e.stopPropagation(); handleOpenTurnModal(day) }}>{turn ? '✎' : '↯'}</button>
                       ) : canEditPreference ? (
-                        <button className="add-preference-btn" onClick={(e) => { e.stopPropagation(); handleOpenPreferenceModal(day); }}>+</button>
+                        <button className="add-preference-btn" onClick={(e) => { e.stopPropagation(); handleOpenPreferenceModal(day) }}>+</button>
                       ) : null}
                     </div>
                   )
                 })}
               </div>
             </div>
-            <div className="calendar-bulk-actions">
-              <div className="bulk-info">
-                {pendingPreferenceCount > 0 ? `${pendingPreferenceCount} modifiche locali da salvare` : 'Nessuna modifica locale in sospeso'}
-              </div>
-              <div className="bulk-buttons">
-                {pendingPreferenceCount > 0 && (
-                  <button className="secondary-action" disabled={savingPreferences} onClick={handleDiscardLocalPreferences}>↩️ Annulla modifiche</button>
-                )}
-                <button className="danger-action" disabled={savingPreferences} onClick={handleClearAllPreferences}>🗑️ Cancella tutte le preferenze</button>
-                <button className="success-action" disabled={savingPreferences || pendingPreferenceCount === 0} onClick={handleSaveAllPreferences}>✅ Salva tutte le preferenze</button>
-              </div>
-            </div>
+            <BulkActions />
           </div>
         )}
 
-        {/* PREFERENCES */}
         {activeTab === 'preferences' && (
           <div className="preferences-view">
             <h2>🎨 Le Tue Preferenze</h2>
-            <p className="info-text">Imposta le tue preferenze per sabati, domeniche e festivi. Le modifiche restano locali finché non premi “Salva tutte le preferenze”.</p>
-            <div className="preferences-grid">
-              {days.filter(d => d && (d.getDay() === 0 || d.getDay() === 6 || isHoliday(d))).map((day, idx) => {
-                if (!day) return null
-                const pref = getPreferenceForDate(day)
-                const dateStr = formatLocalDate(day)
-                const hasPending = Object.prototype.hasOwnProperty.call(pendingPreferences, dateStr)
-                return (
-                  <div key={idx} className={`preference-card ${pref ? pref.toLowerCase() : ''} ${hasPending ? 'pending-pref' : ''}`}>
-                    <div className="preference-date">{day.toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' })}</div>
-                    <div className="preference-value">{pref || 'Non impostata'}{hasPending ? ' · da salvare' : ''}</div>
-                    <button onClick={() => handleOpenPreferenceModal(day)}>Modifica</button>
-                  </div>
-                )
-              })}
+            <p className="info-text">
+              Gli utenti base compilano solo i prossimi 2 mesi. Dopo il 15 si blocca il mese successivo e resta modificabile quello dopo.
+            </p>
+            <div className="calendar-header mini-month-header">
+              <button onClick={() => navigateMonth(-1)} disabled={!canNavigateMonth(-1)}>←</button>
+              <h2>{monthName.charAt(0).toUpperCase() + monthName.slice(1)}</h2>
+              <button onClick={() => navigateMonth(1)} disabled={!canNavigateMonth(1)}>→</button>
             </div>
+            {preferenceDays.length === 0 ? (
+              <p className="empty-state">Nessuna preferenza disponibile in questo mese.</p>
+            ) : (
+              <div className="preferences-grid">
+                {preferenceDays.map(day => {
+                  const pref = getPreferenceForDate(day)
+                  const dateStr = formatLocalDate(day)
+                  const hasPending = Object.prototype.hasOwnProperty.call(pendingPreferences, dateStr)
+                  const policy = getPreferencePolicy(day)
+                  return (
+                    <div key={dateStr} className={`preference-card ${pref ? pref.toLowerCase() : ''} ${hasPending ? 'pending-pref' : ''} ${!policy.editable ? 'locked-card' : ''}`}>
+                      <div className="preference-date">{day.toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' })}</div>
+                      <div className="preference-value">{pref || 'Non impostata'}{hasPending ? ' · da salvare' : ''}</div>
+                      {!policy.editable && <div className="preference-lock">🔒 {policy.reason}</div>}
+                      <button disabled={!policy.editable} onClick={() => handleOpenPreferenceModal(day)}>{policy.editable ? 'Modifica' : 'Bloccata'}</button>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+            <BulkActions />
           </div>
         )}
 
-        {/* USERS */}
         {activeTab === 'users' && (
           <div className="users-view">
             <div className="view-header">
               <h2>👥 Utenti</h2>
-              {currentUser.isManager && <button className="add-btn" onClick={() => setShowUserModal(true)}>+ Nuovo</button>}
+              {currentUser?.isManager && <button className="add-btn" onClick={() => setShowUserModal(true)}>+ Nuovo</button>}
             </div>
             <table className="users-table">
               <thead>
-                <tr><th>Nome</th><th>Email</th><th>Stato</th><th>Punti</th><th>Ultimo Turno</th>{currentUser.isManager && <th>Azioni</th>}</tr>
+                <tr><th>Nome</th><th>Email</th><th>Stato</th><th>Punti</th><th>Ultimo Turno</th>{currentUser?.isManager && <th>Azioni</th>}</tr>
               </thead>
               <tbody>
                 {users.map(user => (
@@ -669,10 +811,11 @@ function App() {
                     <td><span className={`status ${user.stato.toLowerCase()}`}>{user.stato}</span></td>
                     <td>{user.punti}</td>
                     <td>{user.ultimoTurno ? parseLocalDate(user.ultimoTurno).toLocaleDateString('it-IT') : '-'}</td>
-                    {currentUser.isManager && (
+                    {currentUser?.isManager && (
                       <td>
                         <button className="toggle-btn" onClick={() => handleToggleUserStatus(user)}>{user.stato === 'ON' ? '⏸️' : '▶️'}</button>
                         <button className="pin-btn" onClick={() => { setPinToChange({ userId: user.id, newPin: '' }); setShowPinModal(true); }}>🔑</button>
+                        <button className="pin-btn" onClick={() => handleManualUserPoints(user)}>✏️ Punti</button>
                       </td>
                     )}
                   </tr>
@@ -682,7 +825,6 @@ function App() {
           </div>
         )}
 
-        {/* TURNS */}
         {activeTab === 'turns' && (
           <div className="turns-view">
             <div className="view-header">
@@ -690,7 +832,7 @@ function App() {
             </div>
             <table className="turns-table">
               <thead>
-                <tr><th>Data</th><th>Giorno</th><th>Tipo</th><th>Tecnico</th><th>Punti</th>{currentUser.isManager && <th>Azioni</th>}</tr>
+                <tr><th>Data</th><th>Giorno</th><th>Tipo</th><th>Tecnico</th><th>Punti</th>{currentUser?.isManager && <th>Azioni</th>}</tr>
               </thead>
               <tbody>
                 {turns.filter(t => t.statoTurno === 'ASSEGNATO').sort((a, b) => parseLocalDate(a.data).getTime() - parseLocalDate(b.data).getTime()).map(turn => (
@@ -700,8 +842,11 @@ function App() {
                     <td><span className={`turn-type ${turn.tipoGiorno.toLowerCase()}`}>{turn.tipoGiorno}</span></td>
                     <td>{turn.tecnicoAssegnato}</td>
                     <td>{turn.puntiAssegnati}</td>
-                    {currentUser.isManager && (
-                      <td><button className="delete-btn" onClick={() => handleDeleteTurn(turn.data)}>Elimina</button></td>
+                    {currentUser?.isManager && (
+                      <td>
+                        <button className="toggle-btn" onClick={() => handleOpenTurnModal(parseLocalDate(turn.data))}>Forza</button>
+                        <button className="delete-btn" onClick={() => handleDeleteTurn(turn.data)}>Elimina</button>
+                      </td>
                     )}
                   </tr>
                 ))}
@@ -710,24 +855,33 @@ function App() {
           </div>
         )}
 
-        {/* MANAGER */}
-        {activeTab === 'manager' && currentUser.isManager && (
+        {activeTab === 'manager' && currentUser?.isManager && (
           <div className="manager-view">
             <h2>⚙️ Pannello Manager</h2>
             <div className="manager-cards">
               <div className="manager-card">
                 <h3>🎯 Calcolo Automatico</h3>
-                <p>Assegna turni automaticamente</p>
+                <p>Assegna automaticamente i turni generati nel calendario operativo.</p>
                 <button className="primary-btn" onClick={handleCalculateTurns}>Avvia Calcolo</button>
               </div>
               <div className="manager-card">
                 <h3>📊 Aggiorna Punti</h3>
-                <p>Ricalcola tutti i punti</p>
+                <p>Ricalcola i punti dai turni assegnati e dallo storico.</p>
                 <button className="primary-btn" onClick={handleUpdatePoints}>Aggiorna</button>
               </div>
               <div className="manager-card">
+                <h3>↯ Forzatura Manuale</h3>
+                <p>Dal calendario premi ↯ o ✎ su sabati, domeniche e festivi per scegliere il tecnico.</p>
+                <button className="primary-btn" onClick={() => setActiveTab('calendar')}>Apri Calendario</button>
+              </div>
+              <div className="manager-card">
+                <h3>✏️ Punteggi Utenti</h3>
+                <p>Dalla tabella Utenti premi “Punti” per correggere manualmente il saldo di un tecnico.</p>
+                <button className="primary-btn" onClick={() => setActiveTab('users')}>Apri Utenti</button>
+              </div>
+              <div className="manager-card">
                 <h3>🔑 Gestione PIN</h3>
-                <p>Modifica o resetta PIN utenti</p>
+                <p>Modifica o resetta PIN utenti.</p>
                 <button className="primary-btn" onClick={() => setShowPinModal(true)}>Gestisci PIN</button>
               </div>
             </div>
@@ -745,21 +899,17 @@ function App() {
           </div>
         )}
 
-        {/* LOG */}
-        {activeTab === 'log' && currentUser.isManager && (
-          <LogView />
-        )}
+        {activeTab === 'log' && currentUser?.isManager && <LogView />}
       </main>
 
-      {/* MODALS */}
       {showUserModal && (
         <div className="modal-overlay" onClick={() => setShowUserModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <h3>Nuovo Utente</h3>
             <form onSubmit={handleAddUser}>
-              <div className="form-group"><label>Nome</label><input type="text" value={newUser.nome} onChange={e => setNewUser({...newUser, nome: e.target.value})} required /></div>
-              <div className="form-group"><label>Cognome</label><input type="text" value={newUser.cognome} onChange={e => setNewUser({...newUser, cognome: e.target.value})} required /></div>
-              <div className="form-group"><label>Email</label><input type="email" value={newUser.email} onChange={e => setNewUser({...newUser, email: e.target.value})} required /></div>
+              <div className="form-group"><label>Nome</label><input type="text" value={newUser.nome} onChange={e => setNewUser({ ...newUser, nome: e.target.value })} required /></div>
+              <div className="form-group"><label>Cognome</label><input type="text" value={newUser.cognome} onChange={e => setNewUser({ ...newUser, cognome: e.target.value })} required /></div>
+              <div className="form-group"><label>Email</label><input type="email" value={newUser.email} onChange={e => setNewUser({ ...newUser, email: e.target.value })} required /></div>
               <div className="modal-actions">
                 <button type="button" onClick={() => setShowUserModal(false)}>Annulla</button>
                 <button type="submit" className="primary">Salva</button>
@@ -772,14 +922,20 @@ function App() {
       {showTurnModal && (
         <div className="modal-overlay" onClick={() => setShowTurnModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <h3>Assegna Turno</h3>
+            <h3>↯ Forza Turno Manuale</h3>
             <form onSubmit={handleAddTurn}>
               <div className="form-group"><label>Data</label><input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} required /></div>
-              <div className="form-group"><label>Utente</label><select value={selectedUser} onChange={e => setSelectedUser(e.target.value)} required>{users.map(u => <option key={u.id} value={u.id}>{u.nome} {u.cognome}</option>)}</select></div>
+              <div className="form-group">
+                <label>Tecnico</label>
+                <select value={selectedUser} onChange={e => setSelectedUser(e.target.value)} required>
+                  <option value="">Seleziona tecnico</option>
+                  {users.map(u => <option key={u.id} value={u.id}>{u.nome} {u.cognome} · {u.punti} punti · {u.stato}</option>)}
+                </select>
+              </div>
               <div className="form-group"><label>Note</label><input type="text" value={turnNotes} onChange={e => setTurnNotes(e.target.value)} /></div>
               <div className="modal-actions">
                 <button type="button" onClick={() => setShowTurnModal(false)}>Annulla</button>
-                <button type="submit" className="primary">Salva</button>
+                <button type="submit" className="primary">Forza turno</button>
               </div>
             </form>
           </div>
@@ -810,14 +966,15 @@ function App() {
           <div className="modal" onClick={e => e.stopPropagation()}>
             <h3>🔑 Gestione PIN</h3>
             <div className="form-group">
+              <label>Utente</label>
+              <select value={pinToChange.userId} onChange={e => setPinToChange({ ...pinToChange, userId: e.target.value })}>
+                <option value="">Seleziona utente</option>
+                {users.map(u => <option key={u.id} value={u.id}>{u.nome} {u.cognome}</option>)}
+              </select>
+            </div>
+            <div className="form-group">
               <label>Nuovo PIN (4 cifre)</label>
-              <input
-                type="password"
-                maxLength={4}
-                value={pinToChange.newPin}
-                onChange={e => setPinToChange({...pinToChange, newPin: e.target.value.replace(/\D/g, '').slice(0, 4)})}
-                placeholder="****"
-              />
+              <input type="password" maxLength={4} value={pinToChange.newPin} onChange={e => setPinToChange({ ...pinToChange, newPin: e.target.value.replace(/\D/g, '').slice(0, 4) })} placeholder="****" />
             </div>
             <div className="modal-actions">
               <button type="button" onClick={() => setShowPinModal(false)}>Annulla</button>
@@ -828,14 +985,11 @@ function App() {
         </div>
       )}
 
-      <footer className="footer">
-        <p>Reperibilità Smart Area 4 © 2026</p>
-      </footer>
+      <footer className="footer"><p>Reperibilità Smart Area 4 © 2026</p></footer>
     </div>
   )
 }
 
-// Log Component
 function LogView() {
   const [log, setLog] = useState<LogEntry[]>([])
   const [loading, setLoading] = useState(true)
@@ -844,7 +998,7 @@ function LogView() {
     getLog().then(data => {
       setLog(data)
       setLoading(false)
-    })
+    }).catch(() => setLoading(false))
   }, [])
 
   if (loading) return <div>Caricamento...</div>
