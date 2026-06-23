@@ -2,7 +2,7 @@ const API_BASE = '/api';
 const DEFAULT_API_TIMEOUT_MS = 25000;
 const LONG_API_TIMEOUT_MS = 55000;
 
-import type { User, Turn, Preference, Holiday, LogEntry, Stats } from '../src/types';
+import type { User, Turn, Preference, Holiday, LogEntry, Stats, Config } from '../src/types';
 
 type PreferenceColor = 'VERDE' | 'BIANCO' | 'GIALLO' | 'ROSSO';
 type ApiCallOptions = { forcePost?: boolean; timeoutMs?: number };
@@ -209,6 +209,19 @@ export async function getStats(): Promise<Stats> {
   return result.stats || {};
 }
 
+// ==================== CONFIGURAZIONE ====================
+
+export async function getConfig(): Promise<Config> {
+  const result = await callAPI('getConfig');
+  return result.config || {};
+}
+
+export async function updateConfig(config: Partial<Config>): Promise<Config> {
+  const result = await callAPI('updateConfig', config);
+  if (!result.success) throw new Error(result.error);
+  return result.config;
+}
+
 // ==================== MANAGER ====================
 
 export async function calculateTurniAutomatici(): Promise<{ assegnazioni: number; anomalie: any[] }> {
@@ -219,6 +232,11 @@ export async function calculateTurniAutomatici(): Promise<{ assegnazioni: number
 
 export async function updatePoints(): Promise<void> {
   const result = await callAPI('updatePoints', {}, { forcePost: true, timeoutMs: LONG_API_TIMEOUT_MS });
+  if (!result.success) throw new Error(result.error);
+}
+
+export async function resetPoints(): Promise<void> {
+  const result = await callAPI('resetPoints', {}, { forcePost: true, timeoutMs: LONG_API_TIMEOUT_MS });
   if (!result.success) throw new Error(result.error);
 }
 

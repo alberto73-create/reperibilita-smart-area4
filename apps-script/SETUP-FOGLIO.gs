@@ -4,13 +4,14 @@
 
 const CONFIG = {
   sheetName: 'Reperibilità Smart - Area 4',
+  calendarStart: '2026-01-01',
   minFutureMonths: 3,
   maxFutureMonths: 6,
   pausaMinimaGiorni: 30,
   freezeDay: 25,
   punti: {
     sabato: 1,
-    domenica: 1,
+    domenica: 2,
     festivo: 3
   }
 };
@@ -182,6 +183,7 @@ function creaFoglioConfigurazione(ss) {
     ['Giorno_Freeze', CONFIG.freezeDay, 'Giorno del mese per freeze turni'],
     ['Mesi_Futuri_Min', CONFIG.minFutureMonths, 'Minimo mesi futuri generati'],
     ['Mesi_Futuri_Max', CONFIG.maxFutureMonths, 'Massimo mesi futuri generati'],
+    ['Calendario_Start', CONFIG.calendarStart, 'Prima data da generare/leggere nel calendario'],
     ['Manager_Email', '', 'Email del manager'],
     ['Ultimo_Calcolo', '', 'Data ultimo calcolo automatico'],
   ];
@@ -328,13 +330,12 @@ function creaFoglioTurniStorico(ss) {
 
 function generaDateFuture(sheet) {
   const today = new Date();
-  const endMonth = today.getMonth() + CONFIG.maxFutureMonths;
-  const endYear = today.getFullYear() + Math.floor(endMonth / 12);
+  const endDate = new Date(today.getFullYear(), today.getMonth() + CONFIG.maxFutureMonths + 1, 0);
   
   let row = 2;
-  let currentDate = new Date(today.getFullYear(), today.getMonth(), 1);
+  let currentDate = parseConfigDate(CONFIG.calendarStart);
   
-  while (currentDate.getMonth() <= endMonth % 12 || currentDate.getFullYear() < endYear) {
+  while (currentDate <= endDate) {
     const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
     
     for (let day = 1; day <= daysInMonth; day++) {
@@ -356,6 +357,11 @@ function generaDateFuture(sheet) {
     
     currentDate.setMonth(currentDate.getMonth() + 1);
   }
+}
+
+function parseConfigDate(value) {
+  const parts = String(value).split('-').map(Number);
+  return new Date(parts[0], parts[1] - 1, parts[2]);
 }
 
 function getTipoGiorno(dayOfWeek, isHoliday) {

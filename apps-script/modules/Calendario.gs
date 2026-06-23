@@ -67,6 +67,9 @@ function Calendario_addTurnInternal(data, userId) {
     if (!Calendario_isManagerUser(userId)) {
       return { success: false, error: 'Solo un manager può forzare o modificare i turni' };
     }
+    if (Calendario_isFrozenDate(data.data)) {
+      return { success: false, error: 'Turno congelato dal Giorno_Freeze configurato nel foglio' };
+    }
 
     const sheet = initCalendario();
     ensureCalendarDateExists(sheet, data.data);
@@ -105,6 +108,9 @@ function Calendario_deleteTurnInternal(data, userId) {
     if (!Calendario_isManagerUser(userId)) {
       return { success: false, error: 'Solo un manager può eliminare turni' };
     }
+    if (Calendario_isFrozenDate(data)) {
+      return { success: false, error: 'Turno congelato dal Giorno_Freeze configurato nel foglio' };
+    }
 
     const sheet = initCalendario();
     const rows = sheet.getDataRange().getValues();
@@ -132,10 +138,20 @@ function Calendario_deleteTurnInternal(data, userId) {
 }
 
 function getCalendarioBounds() {
+  const config = getConfigData();
   const today = new Date();
-  const start = new Date(today.getFullYear(), today.getMonth(), 1);
-  const end = new Date(today.getFullYear(), today.getMonth() + 3, 0);
+  const start = parseLocalDateForCalendar(config.calendarioStart || '2026-01-01');
+  const end = new Date(today.getFullYear(), today.getMonth() + (config.mesiFuturiMax || 2) + 1, 0);
   return { start: start, end: end };
+}
+
+function Calendario_isFrozenDate(dataStr) {
+  const config = getConfigData();
+  const today = new Date();
+  const target = parseLocalDateForCalendar(dataStr);
+  const nextMonthStart = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+  const nextMonthEnd = new Date(today.getFullYear(), today.getMonth() + 2, 0);
+  return today.getDate() >= (config.giornoFreeze || 25) && target >= nextMonthStart && target <= nextMonthEnd;
 }
 
 function ensureCalendarioWindow(sheet) {

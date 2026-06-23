@@ -163,6 +163,25 @@ function Anagrafica_setUserStatusInternal(id, stato, userId, motivo) {
   }
 }
 
+function Anagrafica_resetPointsInternal(userId) {
+  try {
+    if (!Anagrafica_isManagerUser(userId)) {
+      return { success: false, error: 'Solo un manager può azzerare i punteggi' };
+    }
+
+    const sheet = initAnagrafica();
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return { success: true, message: 'Nessun utente da aggiornare' };
+
+    sheet.getRange(2, 6, lastRow - 1, 1).setValue(0);
+    sheet.getRange(2, 7, lastRow - 1, 1).clearContent();
+    logAction('ANAGRAFICA', 'RESET_POINTS', '', userId, 'Punti e ultimo turno azzerati');
+    return { success: true, message: 'Punti azzerati' };
+  } catch (error) {
+    return { success: false, error: error.toString() };
+  }
+}
+
 function aggiornaPuntiUtente(idTecnico, punti, dataTurno) {
   try {
     const sheet = initAnagrafica();

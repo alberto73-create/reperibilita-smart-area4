@@ -15,6 +15,7 @@
 
 const SETUP_AREA4 = {
   spreadsheetName: 'Reperibilità Smart - Area 4',
+  calendarStart: '2026-01-01',
   monthsAhead: 6,
   defaultManagerEmail: 'manager@azienda.com',
 };
@@ -168,10 +169,11 @@ function createConfigurazioneSheet_(ss) {
     ['Parametro', 'Valore', 'Descrizione'],
     ['Pausa_Minima_Giorni', 30, 'Giorni minimi tra due turni dello stesso tecnico'],
     ['Punti_Sabato', 1, 'Punti assegnati per sabato'],
-    ['Punti_Domenica', 1, 'Punti assegnati per domenica'],
+    ['Punti_Domenica', 2, 'Punti assegnati per domenica'],
     ['Punti_Festivo', 3, 'Punti assegnati per festivo'],
     ['Giorno_Freeze', 25, 'Giorno del mese per bloccare i turni'],
     ['Mesi_Futuri_Max', SETUP_AREA4.monthsAhead, 'Mesi futuri generati nel calendario'],
+    ['Calendario_Start', SETUP_AREA4.calendarStart, 'Prima data da generare/leggere nel calendario'],
     ['Manager_Email', SETUP_AREA4.defaultManagerEmail, 'Email manager iniziale'],
     ['Ultimo_Calcolo', '', 'Data ultimo calcolo automatico'],
   ];
@@ -273,8 +275,9 @@ function createTemplateModuloSheet_(ss) {
 
 function buildWeekendRows_() {
   const rows = [];
-  const start = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-  const end = new Date(start.getFullYear(), start.getMonth() + SETUP_AREA4.monthsAhead + 1, 0);
+  const start = parseSetupDate_(SETUP_AREA4.calendarStart);
+  const today = new Date();
+  const end = new Date(today.getFullYear(), today.getMonth() + SETUP_AREA4.monthsAhead + 1, 0);
   const date = new Date(start);
 
   while (date <= end) {
@@ -295,6 +298,11 @@ function buildWeekendRows_() {
   }
 
   return rows;
+}
+
+function parseSetupDate_(value) {
+  const parts = String(value).split('-').map(Number);
+  return new Date(parts[0], parts[1] - 1, parts[2]);
 }
 
 function getDayType_(date) {

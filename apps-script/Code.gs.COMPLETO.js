@@ -50,6 +50,12 @@ function formatDate(date) {
   return year + '-' + month + '-' + day;
 }
 
+function parseDateString(value) {
+  if (value instanceof Date) return value;
+  const parts = String(value).split('-').map(Number);
+  return new Date(parts[0], parts[1] - 1, parts[2]);
+}
+
 function jsonResponse(data) {
   return ContentService
     .createTextOutput(JSON.stringify(data))
@@ -358,6 +364,20 @@ function logAction(modulo, azione, targetId, actorId, dettagli) {
   } catch (e) {}
 }
 
+function Anagrafica_resetPointsInternal(userId) {
+  try {
+    const sheet = initAnagrafica();
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return { success: true, message: 'Nessun utente da aggiornare' };
+    sheet.getRange(2, 6, lastRow - 1, 1).setValue(0);
+    sheet.getRange(2, 7, lastRow - 1, 1).clearContent();
+    logAction('ANAGRAFICA', 'RESET_POINTS', '', userId, 'Punti e ultimo turno azzerati');
+    return { success: true, message: 'Punti azzerati' };
+  } catch (error) {
+    return { success: false, error: error.toString() };
+  }
+}
+
 // ============================================================================
 // CALENDARIO.GS
 // ============================================================================
@@ -384,11 +404,19 @@ function Calendario_getTurnsInternal() {
   try {
     const sheet = initCalendario();
     const rows = getDataRows(sheet);
+    const config = getConfigData();
+    const today = new Date();
+    const start = parseDateString(config.calendarioStart || '2026-01-01');
+    const end = new Date(today.getFullYear(), today.getMonth() + (config.mesiFuturiMax || 2) + 1, 0);
     const turns = rows.map(r => ({
       data: r[0] ? formatDate(r[0]) : '', giorno: r[1], tipoGiorno: r[2],
       tecnicoAssegnato: r[3] || '', idTecnico: r[4] || '', statoTurno: r[5] || '',
       puntiAssegnati: parseFloat(r[6]) || 0, note: r[7] || ''
-    }));
+    })).filter(t => {
+      if (!t.data) return false;
+      const d = new Date(t.data);
+      return d >= start && d <= end;
+    });
     return { success: true, turns: turns };
   } catch (error) {
     return { success: false, error: error.toString() };
@@ -402,13 +430,22 @@ function Calendario_addTurnInternal(data, userId) {
     for (let i = 1; i < rows.length; i++) {
       if (formatDate(rows[i][0]) === data.data) {
         const row = i + 1;
+        const tipoGiorno = data.tipoGiorno || rows[i][2] || '';
+        const config = getConfigData();
+        let punti = data.punti;
+        if (punti === undefined) {
+          if (tipoGiorno === 'FESTIVO') punti = config.puntiFestivo;
+          else if (tipoGiorno === 'DOMENICA') punti = config.puntiDomenica;
+          else if (tipoGiorno === 'SABATO') punti = config.puntiSabato;
+          else punti = 0;
+        }
         sheet.getRange(row, 4).setValue(data.tecnicoNome);
         sheet.getRange(row, 5).setValue(data.idTecnico);
         sheet.getRange(row, 6).setValue('ASSEGNATO');
-        sheet.getRange(row, 7).setValue(data.punti || 0);
+        sheet.getRange(row, 7).setValue(punti || 0);
         sheet.getRange(row, 8).setValue(data.note || '');
-        Calendario_addToStorico(data);
-        aggiornaPuntiUtente(data.idTecnico, data.punti, data.data);
+        Calendario_addToStorico({ ...data, tipoGiorno: tipoGiorno, punti: punti });
+        Algoritmo_updatePointsInternal(userId);
         logAction('CALENDARIO', 'ADD_TURN', data.idTecnico, userId, 'Turno aggiunto il ' + data.data);
         return { success: true, message: 'Turno aggiunto' };
       }
@@ -442,11 +479,12 @@ function Calendario_deleteTurnInternal(data, userId) {
 }
 
 function generaDateFuture(sheet) {
+  const config = getConfigData();
   const today = new Date();
-  const endMonth = today.getMonth() + 6;
+  const endDate = new Date(today.getFullYear(), today.getMonth() + (config.mesiFuturiMax || 2) + 1, 0);
   let row = 2;
-  let currentDate = new Date(today.getFullYear(), today.getMonth(), 1);
-  while (currentDate.getMonth() <= endMonth % 12 || currentDate.getFullYear() < today.getFullYear() + 1) {
+  let currentDate = parseDateString(config.calendarioStart || '2026-01-01');
+  while (currentDate <= endDate) {
     const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
     for (let day = 1; day <= daysInMonth; day++) {
       const date = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
@@ -616,18 +654,30 @@ function Algoritmo_calculateTurniAutomaticiInternal(userId) {
       return { success: false, error: 'Errore nel recupero dati' };
     }
     const users = usersResult.users.filter(u => u.stato === 'ON');
-    const turns = turnsResult.turns.filter(t =>
+    const allTurns = turnsResult.turns || [];
+    const turns = allTurns.filter(t =>
       !t.idTecnico && (t.tipoGiorno === 'SABATO' || t.tipoGiorno === 'DOMENICA' || t.tipoGiorno === 'FESTIVO')
     );
     let assegnazioni = 0;
     let anomalie = [];
     for (const turno of turns) {
-      const result = assegnaTurno(turno, users, prefResult.preferences || [], config);
+      const result = assegnaTurno(turno, users, prefResult.preferences || [], config, allTurns);
       if (result.success) {
         Calendario_addTurnInternal({
           data: turno.data, idTecnico: result.idTecnico, tecnicoNome: result.tecnicoNome,
           tipoGiorno: turno.tipoGiorno, punti: result.punti, note: 'Assegnazione automatica'
         }, userId);
+        const user = users.find(u => u.id === result.idTecnico);
+        if (user) {
+          user.punti = (parseFloat(user.punti) || 0) + result.punti;
+          user.ultimoTurno = turno.data;
+        }
+        allTurns.push({
+          data: turno.data,
+          idTecnico: result.idTecnico,
+          statoTurno: 'ASSEGNATO',
+          puntiAssegnati: result.punti
+        });
         assegnazioni++;
         logIA('AUTO_ASSIGN', turno.data, result.idTecnico, result.tecnicoNome,
           result.punteggioVirtuale, 'Assegnazione automatica - ' + turno.tipoGiorno,
@@ -655,10 +705,10 @@ function Algoritmo_updatePointsInternal(userId) {
       const punti = parseFloat(row[5]) || 0;
       puntiPerUtente[idTecnico] = (puntiPerUtente[idTecnico] || 0) + punti;
     }
-    for (let i = 1; i < users.length; i++) {
+    for (let i = 0; i < users.length; i++) {
       const id = users[i][0];
       const puntiTotali = puntiPerUtente[id] || 0;
-      usersSheet.getRange(i + 1, 6).setValue(puntiTotali);
+      usersSheet.getRange(i + 2, 6).setValue(puntiTotali);
     }
     logAction('ALGORITMO', 'UPDATE_POINTS', '', userId, 'Punti aggiornati per tutti gli utenti');
     return { success: true, message: 'Punti aggiornati' };
@@ -667,13 +717,14 @@ function Algoritmo_updatePointsInternal(userId) {
   }
 }
 
-function assegnaTurno(turno, users, preferences, config) {
+function assegnaTurno(turno, users, preferences, config, allTurns) {
   const turnoDate = new Date(turno.data);
   let candidati = users.filter(u => {
     if (u.stato === 'OFF') return false;
-    if (u.ultimoTurno) {
-      const giorniDallUltimo = daysBetween(new Date(u.ultimoTurno), turnoDate);
-      if (giorniDallUltimo < config.pausaMinima) return false;
+    const turnsForUser = (allTurns || []).filter(t => t.idTecnico === u.id && t.statoTurno === 'ASSEGNATO' && t.data);
+    for (const assignedTurn of turnsForUser) {
+      const giorniDallTurno = daysBetween(new Date(assignedTurn.data), turnoDate);
+      if (giorniDallTurno < config.pausaMinima) return false;
     }
     return true;
   });
@@ -719,7 +770,74 @@ function getPreferenzaPerData(users, data, preferences) {
 }
 
 function getConfigData() {
-  return { pausaMinima: 30, puntiSabato: 1, puntiDomenica: 1, puntiFestivo: 3 };
+  try {
+    const sheet = getSheetOrInit('Configurazione');
+    const defaults = [
+      ['Pausa_Minima_Giorni', 30, 'Giorni minimi tra due turni dello stesso tecnico'],
+      ['Punti_Sabato', 1, 'Punti assegnati per sabato'],
+      ['Punti_Domenica', 2, 'Punti assegnati per domenica'],
+      ['Punti_Festivo', 3, 'Punti assegnati per festivo'],
+      ['Giorno_Freeze', 25, 'Giorno del mese per congelare i turni del mese successivo'],
+      ['Mesi_Futuri_Max', 2, 'Mesi futuri generati nel calendario'],
+      ['Calendario_Start', '2026-01-01', 'Prima data da generare/leggere nel calendario'],
+      ['Manager_Email', 'manager@azienda.com', 'Email manager iniziale'],
+      ['Ultimo_Calcolo', '', 'Data ultimo calcolo automatico']
+    ];
+    const rows = sheet.getDataRange().getValues();
+    const existing = {};
+    for (let i = 1; i < rows.length; i++) existing[String(rows[i][0])] = i + 1;
+    defaults.forEach(row => {
+      if (!existing[row[0]]) sheet.appendRow(row);
+    });
+    const refreshedRows = sheet.getDataRange().getValues();
+    const map = {};
+    for (let i = 1; i < refreshedRows.length; i++) map[String(refreshedRows[i][0])] = refreshedRows[i][1];
+    return {
+      pausaMinima: parseInt(map.Pausa_Minima_Giorni, 10) || 30,
+      puntiSabato: parseFloat(map.Punti_Sabato) || 1,
+      puntiDomenica: parseFloat(map.Punti_Domenica) || 2,
+      puntiFestivo: parseFloat(map.Punti_Festivo) || 3,
+      giornoFreeze: parseInt(map.Giorno_Freeze, 10) || 25,
+      mesiFuturiMax: parseInt(map.Mesi_Futuri_Max, 10) || 2,
+      calendarioStart: String(map.Calendario_Start || '2026-01-01'),
+      managerEmail: String(map.Manager_Email || 'manager@azienda.com'),
+      ultimoCalcolo: map.Ultimo_Calcolo ? String(map.Ultimo_Calcolo) : ''
+    };
+  } catch (e) {
+    return { pausaMinima: 30, puntiSabato: 1, puntiDomenica: 2, puntiFestivo: 3, giornoFreeze: 25, mesiFuturiMax: 2, calendarioStart: '2026-01-01', managerEmail: 'manager@azienda.com', ultimoCalcolo: '' };
+  }
+}
+
+function Config_getConfigInternal(userId) {
+  return { success: true, config: getConfigData() };
+}
+
+function Config_updateConfigInternal(data, userId) {
+  try {
+    const sheet = getSheetOrInit('Configurazione');
+    getConfigData();
+    const allowed = {
+      pausaMinima: 'Pausa_Minima_Giorni',
+      puntiSabato: 'Punti_Sabato',
+      puntiDomenica: 'Punti_Domenica',
+      puntiFestivo: 'Punti_Festivo',
+      giornoFreeze: 'Giorno_Freeze',
+      mesiFuturiMax: 'Mesi_Futuri_Max',
+      calendarioStart: 'Calendario_Start',
+      managerEmail: 'Manager_Email'
+    };
+    const rows = sheet.getDataRange().getValues();
+    const rowByKey = {};
+    for (let i = 1; i < rows.length; i++) rowByKey[String(rows[i][0])] = i + 1;
+    Object.keys(allowed).forEach(frontKey => {
+      if (data[frontKey] === undefined) return;
+      const row = rowByKey[allowed[frontKey]];
+      if (row) sheet.getRange(row, 2).setValue(data[frontKey]);
+    });
+    return { success: true, config: getConfigData() };
+  } catch (error) {
+    return { success: false, error: error.toString() };
+  }
 }
 
 function daysBetween(date1, date2) {
@@ -745,6 +863,7 @@ function doGet(e) {
       case 'getTurns': return jsonResponse(Calendario_getTurnsInternal());
       case 'getPreferences': return jsonResponse(Preferenze_getPreferencesInternal());
       case 'getHolidays': return jsonResponse(getHolidays());
+      case 'getConfig': return jsonResponse(Config_getConfigInternal(userId));
       case 'getLog': return jsonResponse(Log_getLogInternal());
       case 'getStats': return jsonResponse(getStats(userId));
       default: return jsonResponse({ success: false, error: 'Azione non valida: ' + action });
@@ -772,6 +891,8 @@ function doPost(e) {
       case 'setPreference': return jsonResponse(Preferenze_setPreferenceInternal(data, userId));
       case 'calculateTurni': return jsonResponse(Algoritmo_calculateTurniAutomaticiInternal(userId));
       case 'updatePoints': return jsonResponse(Algoritmo_updatePointsInternal(userId));
+      case 'resetPoints': return jsonResponse(Anagrafica_resetPointsInternal(userId));
+      case 'updateConfig': return jsonResponse(Config_updateConfigInternal(data, userId));
       case 'changePin': return jsonResponse(Auth_changePinInternal(data.userId, data.newPin, userId));
       case 'resetPin': return jsonResponse(Auth_resetPinInternal(data.userId, userId));
       case 'getUserList': return jsonResponse(Auth_getUserListInternal(userId));

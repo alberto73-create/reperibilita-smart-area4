@@ -14,8 +14,9 @@ function Config_getConfigInternal(userId) {
       puntiSabato: parseFloat(map.Punti_Sabato) || 1,
       puntiDomenica: parseFloat(map.Punti_Domenica) || 2,
       puntiFestivo: parseFloat(map.Punti_Festivo) || 3,
-      giornoFreeze: parseInt(map.Giorno_Freeze, 10) || 15,
+      giornoFreeze: parseInt(map.Giorno_Freeze, 10) || 25,
       mesiFuturiMax: parseInt(map.Mesi_Futuri_Max, 10) || 2,
+      calendarioStart: String(map.Calendario_Start || '2026-01-01'),
       managerEmail: String(map.Manager_Email || 'manager@azienda.com'),
       ultimoCalcolo: map.Ultimo_Calcolo ? String(map.Ultimo_Calcolo) : ''
     };
@@ -39,6 +40,7 @@ function Config_updateConfigInternal(data, userId) {
       puntiFestivo: 'Punti_Festivo',
       giornoFreeze: 'Giorno_Freeze',
       mesiFuturiMax: 'Mesi_Futuri_Max',
+      calendarioStart: 'Calendario_Start',
       managerEmail: 'Manager_Email'
     };
 
@@ -76,8 +78,9 @@ function Config_initSheet() {
     ['Punti_Sabato', 1, 'Punti assegnati per sabato'],
     ['Punti_Domenica', 2, 'Punti assegnati per domenica'],
     ['Punti_Festivo', 3, 'Punti assegnati per festivo'],
-    ['Giorno_Freeze', 15, 'Giorno del mese per bloccare preferenze del mese successivo'],
+    ['Giorno_Freeze', 25, 'Giorno del mese per congelare le modifiche ai turni del mese successivo'],
     ['Mesi_Futuri_Max', 2, 'Mesi futuri generati nel calendario'],
+    ['Calendario_Start', '2026-01-01', 'Prima data da generare/leggere nel calendario'],
     ['Manager_Email', 'manager@azienda.com', 'Email manager iniziale'],
     ['Ultimo_Calcolo', '', 'Data ultimo calcolo automatico']
   ];

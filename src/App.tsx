@@ -2,12 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import './App.css'
 import './prefs-bulk.css'
-import type { User, Turn, Preference, Holiday, LogEntry, Stats } from './types'
+import type { User, Turn, Preference, Holiday, LogEntry, Stats, Config } from './types'
 import {
-  login as apiLogin,
+  login as apiLogin, getConfig, updateConfig as apiUpdateConfig,
   getUsers, getTurns, getPreferences, getLog, getStats, getHolidays,
   addUser, updateUser, setUserStatus, addTurn, deleteTurn, setPreference, setPreferencesBatch, clearPreferencesForUser,
-  calculateTurniAutomatici, updatePoints, changePin, resetPin
+  calculateTurniAutomatici, updatePoints, resetPoints, changePin, resetPin
 } from '../lib/api'
 
 type PreferenceColor = 'VERDE' | 'BIANCO' | 'GIALLO' | 'ROSSO'
@@ -28,7 +28,20 @@ type CachedAppData = {
   preferences: Preference[]
   holidays: Holiday[]
   stats: Stats | null
+  config: Config
   savedAt: string
+}
+
+const DEFAULT_CONFIG: Config = {
+  pausaMinima: 30,
+  puntiSabato: 1,
+  puntiDomenica: 2,
+  puntiFestivo: 3,
+  giornoFreeze: 25,
+  mesiFuturiMax: 2,
+  calendarioStart: '2026-01-01',
+  managerEmail: 'manager@azienda.com',
+  ultimoCalcolo: ''
 }
 
 const pad2 = (value: number) => String(value).padStart(2, '0')
@@ -75,6 +88,8 @@ function App() {
   const [preferences, setPreferences] = useState<Preference[]>([])
   const [holidays, setHolidays] = useState<Holiday[]>([])
   const [stats, setStats] = useState<Stats | null>(null)
+  const [config, setConfig] = useState<Config>(DEFAULT_CONFIG)
+  const [configDraft, setConfigDraft] = useState<Config>(DEFAULT_CONFIG)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [lastCacheAt, setLastCacheAt] = useState<string>('')
@@ -155,6 +170,8 @@ function App() {
       setPreferences(cached.preferences || [])
       setHolidays(cached.holidays || [])
       setStats(cached.stats || null)
+      setConfig({ ...DEFAULT_CONFIG, ...(cached.config || {}) })
+      setConfigDraft({ ...DEFAULT_CONFIG, ...(cached.config || {}) })
       setLastCacheAt(cached.savedAt || '')
       setError(null)
       setLoading(false)
@@ -184,19 +201,23 @@ function App() {
     const cacheUserId = userIdForCache || currentUser?.id
     try {
       setLoading(true)
-      const [usersData, turnsData, preferencesData, holidaysData, statsData] = await Promise.all([
+      const [usersData, turnsData, preferencesData, holidaysData, statsData, configData] = await Promise.all([
         getUsers(),
         getTurns(),
         getPreferences(),
         getHolidays(),
-        getStats()
+        getStats(),
+        getConfig()
       ])
+      const nextConfig = { ...DEFAULT_CONFIG, ...configData }
 
       setUsers(usersData)
       setTurns(turnsData)
       setPreferences(preferencesData)
       setHolidays(holidaysData)
       setStats(statsData)
+      setConfig(nextConfig)
+      setConfigDraft(nextConfig)
       setError(null)
 
       if (cacheUserId) {
@@ -207,6 +228,7 @@ function App() {
           preferences: preferencesData,
           holidays: holidaysData,
           stats: statsData,
+          config: nextConfig,
           savedAt
         }
         localStorage.setItem(cacheKeyForUser(cacheUserId), JSON.stringify(cacheData))
@@ -320,19 +342,19 @@ function App() {
     const diff = monthDiffFromToday(date)
     const today = new Date()
 
-    if (diff < 1 || diff > 2) {
+    if (diff < 1 || diff > config.mesiFuturiMax) {
       return {
         visible: false,
         editable: false,
-        reason: 'Gli utenti possono gestire solo i prossimi 2 mesi.'
+        reason: `Gli utenti possono gestire solo i prossimi ${config.mesiFuturiMax} mesi.`
       }
     }
 
-    if (diff === 1 && today.getDate() > 15) {
+    if (diff === 1 && today.getDate() > config.giornoFreeze) {
       return {
         visible: true,
         editable: false,
-        reason: 'Mese congelato: le preferenze si chiudono il 15 del mese precedente.'
+        reason: `Mese congelato: le preferenze si chiudono il giorno ${config.giornoFreeze} del mese precedente.`
       }
     }
 
@@ -361,16 +383,17 @@ function App() {
 
   const getPointsForDate = (dateStr: string) => {
     const tipo = getTipoGiornoForDate(dateStr)
-    if (tipo === 'FESTIVO') return 3
-    if (tipo === 'DOMENICA') return 2
-    return 1
+    if (tipo === 'FESTIVO') return config.puntiFestivo
+    if (tipo === 'DOMENICA') return config.puntiDomenica
+    if (tipo === 'SABATO') return config.puntiSabato
+    return 0
   }
 
   const canNavigateMonth = (delta: number) => {
     if (currentUser?.isManager) return true
     const nextMonth = addMonths(currentMonth, delta)
     const diff = monthDiffFromToday(nextMonth)
-    return diff >= 0 && diff <= 2
+    return diff >= 0 && diff <= config.mesiFuturiMax
   }
 
   const navigateMonth = (delta: number) => {
@@ -643,6 +666,35 @@ function App() {
     }
   }
 
+  const handleResetPoints = async () => {
+    if (!confirm('Azzerare punti e ultimo turno di tutti gli utenti?')) return
+    try {
+      await resetPoints()
+      alert('Punti azzerati!')
+      loadData()
+    } catch (err) {
+      alert('Errore azzeramento punti: ' + (err instanceof Error ? err.message : 'errore sconosciuto'))
+    }
+  }
+
+  const handleSaveConfig = async () => {
+    if (!currentUser?.isManager) return
+    try {
+      const saved = await apiUpdateConfig(configDraft)
+      const next = { ...DEFAULT_CONFIG, ...saved }
+      setConfig(next)
+      setConfigDraft(next)
+      await loadData()
+      alert('Configurazione aggiornata dal foglio.')
+    } catch (err) {
+      alert('Errore configurazione: ' + (err instanceof Error ? err.message : 'errore sconosciuto'))
+    }
+  }
+
+  const updateConfigDraftNumber = (key: keyof Config, value: string) => {
+    setConfigDraft(prev => ({ ...prev, [key]: Number(value) }))
+  }
+
   const handleChangePin = async () => {
     if (!pinToChange.userId || !pinToChange.newPin) return
     if (!/^\d{4}$/.test(pinToChange.newPin)) {
@@ -772,7 +824,7 @@ function App() {
           <div className="calendar-view">
             {!currentUser?.isManager && (
               <p className="window-note">
-                Utente base: calendario limitato a mese corrente + 2 mesi. Le preferenze del mese successivo si congelano dopo il giorno 15.
+                Utente base: calendario limitato a mese corrente + {config.mesiFuturiMax} mesi. Le preferenze del mese successivo si congelano dopo il giorno {config.giornoFreeze}.
               </p>
             )}
             <div className="calendar-header">
@@ -787,7 +839,7 @@ function App() {
               <span className="legend-item"><span className="legend-color rosso"></span> Rosso</span>
             </div>
             {lastCacheAt && <p className="cache-note">Cache locale attiva · ultimo aggiornamento {new Date(lastCacheAt).toLocaleString('it-IT')}</p>}
-            {!currentUser?.isManager && monthDiff === 1 && new Date().getDate() > 15 && (
+            {!currentUser?.isManager && monthDiff === 1 && new Date().getDate() > config.giornoFreeze && (
               <p className="lock-note">🔒 Questo mese è congelato per gli utenti base. Il manager può ancora forzare i turni.</p>
             )}
             <div className="calendar-grid">
@@ -844,7 +896,7 @@ function App() {
           <div className="preferences-view">
             <h2>🎨 Le Tue Preferenze</h2>
             <p className="info-text">
-              Gli utenti base compilano solo i prossimi 2 mesi. Dopo il 15 si blocca il mese successivo e resta modificabile quello dopo.
+              Gli utenti base compilano solo i prossimi {config.mesiFuturiMax} mesi. Dopo il giorno {config.giornoFreeze} si blocca il mese successivo e restano modificabili i mesi successivi consentiti.
             </p>
             <div className="calendar-header mini-month-header">
               <button onClick={() => navigateMonth(-1)} disabled={!canNavigateMonth(-1)}>←</button>
@@ -997,6 +1049,11 @@ function App() {
                 <button className="primary-btn" onClick={handleUpdatePoints}>Aggiorna</button>
               </div>
               <div className="manager-card">
+                <h3>🧹 Azzera Punti</h3>
+                <p>Azzera punti e ultimo turno in Anagrafica senza eliminare i turni dal calendario.</p>
+                <button className="primary-btn danger-primary" onClick={handleResetPoints}>Azzera punti</button>
+              </div>
+              <div className="manager-card">
                 <h3>↯ Forzatura Manuale</h3>
                 <p>Dal calendario premi ↯ o ✎ su sabati, domeniche e festivi per scegliere il tecnico.</p>
                 <button className="primary-btn" onClick={() => setActiveTab('calendar')}>Apri Calendario</button>
@@ -1023,6 +1080,20 @@ function App() {
                 </div>
               </div>
             )}
+            <div className="config-box">
+              <h3>⚙️ Configurazione foglio</h3>
+              <p className="config-help">Questi valori vengono letti e salvati nel foglio “Configurazione” e guidano calendario, punti, freeze e algoritmo.</p>
+              <div className="config-grid">
+                <label>Pausa minima giorni<input type="number" min="0" value={configDraft.pausaMinima} onChange={e => updateConfigDraftNumber('pausaMinima', e.target.value)} /></label>
+                <label>Punti sabato<input type="number" min="0" value={configDraft.puntiSabato} onChange={e => updateConfigDraftNumber('puntiSabato', e.target.value)} /></label>
+                <label>Punti domenica<input type="number" min="0" value={configDraft.puntiDomenica} onChange={e => updateConfigDraftNumber('puntiDomenica', e.target.value)} /></label>
+                <label>Punti festivo<input type="number" min="0" value={configDraft.puntiFestivo} onChange={e => updateConfigDraftNumber('puntiFestivo', e.target.value)} /></label>
+                <label>Giorno freeze<input type="number" min="1" max="31" value={configDraft.giornoFreeze} onChange={e => updateConfigDraftNumber('giornoFreeze', e.target.value)} /></label>
+                <label>Mesi futuri max<input type="number" min="1" max="12" value={configDraft.mesiFuturiMax} onChange={e => updateConfigDraftNumber('mesiFuturiMax', e.target.value)} /></label>
+                <label>Inizio calendario<input type="date" value={configDraft.calendarioStart} onChange={e => setConfigDraft(prev => ({ ...prev, calendarioStart: e.target.value }))} /></label>
+              </div>
+              <button className="primary-btn" onClick={handleSaveConfig}>Salva configurazione</button>
+            </div>
           </div>
         )}
 

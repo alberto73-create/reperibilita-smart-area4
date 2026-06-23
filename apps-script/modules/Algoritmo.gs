@@ -14,7 +14,8 @@ function Algoritmo_calculateTurniAutomaticiInternal(userId) {
     }
 
     const users = usersResult.users.filter(u => u.stato === 'ON');
-    const turns = turnsResult.turns
+    const allTurns = turnsResult.turns || [];
+    const turns = allTurns
       .filter(t => !t.idTecnico && (t.tipoGiorno === 'SABATO' || t.tipoGiorno === 'DOMENICA' || t.tipoGiorno === 'FESTIVO'))
       .sort((a, b) => String(a.data).localeCompare(String(b.data)));
 
@@ -22,7 +23,12 @@ function Algoritmo_calculateTurniAutomaticiInternal(userId) {
     let anomalie = [];
 
     for (const turno of turns) {
-      const result = assegnaTurno(turno, users, prefResult.preferences || [], config);
+      if (Calendario_isFrozenDate(turno.data)) {
+        anomalie.push({ data: turno.data, motivo: 'Turno congelato dal Giorno_Freeze' });
+        continue;
+      }
+
+      const result = assegnaTurno(turno, users, prefResult.preferences || [], config, allTurns);
 
       if (result.success) {
         Calendario_addTurnInternal({
@@ -40,6 +46,12 @@ function Algoritmo_calculateTurniAutomaticiInternal(userId) {
           user.punti = (parseFloat(user.punti) || 0) + result.punti;
           user.ultimoTurno = turno.data;
         }
+        allTurns.push({
+          data: turno.data,
+          idTecnico: result.idTecnico,
+          statoTurno: 'ASSEGNATO',
+          puntiAssegnati: result.punti
+        });
 
         assegnazioni++;
       } else {
@@ -90,14 +102,15 @@ function Algoritmo_updatePointsInternal(userId) {
   }
 }
 
-function assegnaTurno(turno, users, preferences, config) {
+function assegnaTurno(turno, users, preferences, config, allTurns) {
   const turnoDate = parseLocalDateForCalendar(turno.data);
 
   let candidati = users.filter(u => {
     if (u.stato === 'OFF') return false;
-    if (u.ultimoTurno) {
-      const giorniDallUltimo = signedDaysBetween(parseLocalDateForCalendar(u.ultimoTurno), turnoDate);
-      if (giorniDallUltimo >= 0 && giorniDallUltimo < config.pausaMinima) return false;
+    const turnsForUser = (allTurns || []).filter(t => t.idTecnico === u.id && t.statoTurno === 'ASSEGNATO' && t.data);
+    for (const assignedTurn of turnsForUser) {
+      const distanza = Math.abs(signedDaysBetween(parseLocalDateForCalendar(assignedTurn.data), turnoDate));
+      if (distanza < config.pausaMinima) return false;
     }
     return true;
   });
@@ -171,8 +184,9 @@ function getConfigData() {
     puntiSabato: 1,
     puntiDomenica: 2,
     puntiFestivo: 3,
-    giornoFreeze: 15,
+    giornoFreeze: 25,
     mesiFuturiMax: 2,
+    calendarioStart: '2026-01-01',
     managerEmail: 'manager@azienda.com',
     ultimoCalcolo: ''
   };
