@@ -5,6 +5,7 @@ function setCors(res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Cache-Control', 'no-store');
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -60,7 +61,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let data: any;
     try {
       data = JSON.parse(text);
-    } catch (_error) {
+    } catch {
       res.status(response.ok ? 502 : response.status).json({
         success: false,
         error: 'Apps Script did not return JSON. Check Apps Script deployment permissions and code.',
