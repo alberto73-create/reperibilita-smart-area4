@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import './App.css'
+import './prefs-bulk.css'
 import type { User, Turn, Preference, Holiday, LogEntry, Stats } from './types'
 import {
   login as apiLogin,
