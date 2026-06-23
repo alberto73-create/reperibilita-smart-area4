@@ -16,7 +16,13 @@ interface LoginResult {
 }
 
 async function callAPI(action: string, data?: any): Promise<any> {
-  const url = `${API_BASE}?action=${action}`;
+  const params = new URLSearchParams({ action });
+  const token = localStorage.getItem('auth_token');
+  if (token) {
+    params.set('token', token);
+  }
+
+  const url = `${API_BASE}?${params.toString()}`;
 
   const options: RequestInit = {
     method: data ? 'POST' : 'GET',
@@ -39,7 +45,8 @@ async function callAPI(action: string, data?: any): Promise<any> {
 // ==================== AUTH ====================
 
 export async function login(email: string, pin: string): Promise<LoginResult> {
-  const url = `${API_BASE}?action=login&email=${encodeURIComponent(email)}&pin=${pin}`;
+  const params = new URLSearchParams({ action: 'login', email, pin });
+  const url = `${API_BASE}?${params.toString()}`;
   const response = await fetch(url, { method: 'GET' });
   return await response.json();
 }

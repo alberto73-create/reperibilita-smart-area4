@@ -18,8 +18,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { action } = req.query;
-    const url = APPS_SCRIPT_URL + '?action=' + action;
+    const params = new URLSearchParams();
+
+    for (const [key, value] of Object.entries(req.query)) {
+      if (key === 'path') continue;
+      if (Array.isArray(value)) {
+        value.forEach(item => params.append(key, item));
+      } else if (typeof value === 'string') {
+        params.set(key, value);
+      }
+    }
+
+    const url = `${APPS_SCRIPT_URL}?${params.toString()}`;
 
     const response = await fetch(url, {
       method: req.method as string,
