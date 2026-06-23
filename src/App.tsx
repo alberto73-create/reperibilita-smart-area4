@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import './App.css'
 import './prefs-bulk.css'
-import type { User, Turn, Preference, Holiday, LogEntry, Stats } from './types'
+import type { User, Turn, Preference, Holiday, LogEntry, Stats, Config } from './types'
 import {
-  login as apiLogin,
+  login as apiLogin, getConfig, updateConfig as apiUpdateConfig,
   getUsers, getTurns, getPreferences, getLog, getStats, getHolidays,
   addUser, updateUser, setUserStatus, addTurn, deleteTurn, setPreference, setPreferencesBatch, clearPreferencesForUser,
-  calculateTurniAutomatici, updatePoints, changePin, resetPin
+  calculateTurniAutomatici, updatePoints, resetPoints, changePin, resetPin
 } from '../lib/api'
 
 type PreferenceColor = 'VERDE' | 'BIANCO' | 'GIALLO' | 'ROSSO'
@@ -28,7 +28,20 @@ type CachedAppData = {
   preferences: Preference[]
   holidays: Holiday[]
   stats: Stats | null
+  config: Config
   savedAt: string
+}
+
+const DEFAULT_CONFIG: Config = {
+  pausaMinima: 30,
+  puntiSabato: 1,
+  puntiDomenica: 2,
+  puntiFestivo: 3,
+  giornoFreeze: 25,
+  mesiFuturiMax: 2,
+  calendarioStart: '2026-01-01',
+  managerEmail: 'manager@azienda.com',
+  ultimoCalcolo: ''
 }
 
 const pad2 = (value: number) => String(value).padStart(2, '0')
@@ -75,6 +88,8 @@ function App() {
   const [preferences, setPreferences] = useState<Preference[]>([])
   const [holidays, setHolidays] = useState<Holiday[]>([])
   const [stats, setStats] = useState<Stats | null>(null)
+  const [config, setConfig] = useState<Config>(DEFAULT_CONFIG)
+  const [configDraft, setConfigDraft] = useState<Config>(DEFAULT_CONFIG)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [lastCacheAt, setLastCacheAt] = useState<string>('')
@@ -88,6 +103,7 @@ function App() {
 
   const [newUser, setNewUser] = useState({ nome: '', cognome: '', email: '' })
   const [selectedDate, setSelectedDate] = useState<string>('')
+  const [bulkTurnDates, setBulkTurnDates] = useState<string[]>([])
   const [selectedUser, setSelectedUser] = useState<string>('')
   const [turnNotes, setTurnNotes] = useState('')
   const [selectedPreference, setSelectedPreference] = useState<PreferenceColor>('BIANCO')
@@ -96,13 +112,54 @@ function App() {
   const [pinToChange, setPinToChange] = useState({ userId: '', newPin: '' })
 
   const activeUsers = useMemo(() => users.filter(u => u.stato === 'ON'), [users])
+  const assignedTurns = useMemo(
+    () => turns
+      .filter(t => t.statoTurno === 'ASSEGNATO')
+      .sort((a, b) => parseLocalDate(a.data).getTime() - parseLocalDate(b.data).getTime()),
+    [turns]
+  )
+
+  const selectedTurnDatesSet = useMemo(() => new Set(bulkTurnDates), [bulkTurnDates])
+  const allAssignedTurnsSelected = assignedTurns.length > 0 && assignedTurns.every(turn => selectedTurnDatesSet.has(turn.data))
+  const selectedAssignedTurnCount = assignedTurns.filter(turn => selectedTurnDatesSet.has(turn.data)).length
+  const turnBalance = useMemo(() => {
+    const byUser = new Map<string, { nome: string; turni: number; punti: number }>()
+
+    users.forEach(user => {
+      byUser.set(user.id, {
+        nome: `${user.nome} ${user.cognome}`,
+        turni: 0,
+        punti: 0
+      })
+    })
+
+    assignedTurns.forEach(turn => {
+      if (!turn.idTecnico) return
+      const current = byUser.get(turn.idTecnico) || {
+        nome: turn.tecnicoAssegnato || turn.idTecnico,
+        turni: 0,
+        punti: 0
+      }
+      current.turni += 1
+      current.punti += Number(turn.puntiAssegnati) || 0
+      byUser.set(turn.idTecnico, current)
+    })
+
+    return Array.from(byUser.entries())
+      .map(([id, value]) => ({ id, ...value }))
+      .filter(item => item.turni > 0 || users.some(user => user.id === item.id && user.stato === 'ON'))
+      .sort((a, b) => b.punti - a.punti || b.turni - a.turni || a.nome.localeCompare(b.nome))
+  }, [assignedTurns, users])
+
+  const balancePoints = turnBalance.map(item => item.punti)
+  const balanceGap = balancePoints.length > 1 ? Math.max(...balancePoints) - Math.min(...balancePoints) : 0
 
   const persistPendingPreferences = (userId: string, next: PendingPreferences) => {
     setPendingPreferences(next)
     localStorage.setItem(draftKeyForUser(userId), JSON.stringify(next))
   }
 
-  const hydrateCachedData = (userId: string) => {
+  const hydrateCachedData = useCallback((userId: string) => {
     const cachedRaw = localStorage.getItem(cacheKeyForUser(userId))
     if (!cachedRaw) return false
 
@@ -113,6 +170,8 @@ function App() {
       setPreferences(cached.preferences || [])
       setHolidays(cached.holidays || [])
       setStats(cached.stats || null)
+      setConfig({ ...DEFAULT_CONFIG, ...(cached.config || {}) })
+      setConfigDraft({ ...DEFAULT_CONFIG, ...(cached.config || {}) })
       setLastCacheAt(cached.savedAt || '')
       setError(null)
       setLoading(false)
@@ -121,7 +180,7 @@ function App() {
       localStorage.removeItem(cacheKeyForUser(userId))
       return false
     }
-  }
+  }, [])
 
   const hydrateDraftPreferences = (userId: string) => {
     const draftRaw = localStorage.getItem(draftKeyForUser(userId))
@@ -138,23 +197,27 @@ function App() {
     }
   }
 
-  const loadData = async (userIdForCache?: string) => {
+  const loadData = useCallback(async (userIdForCache?: string) => {
     const cacheUserId = userIdForCache || currentUser?.id
     try {
       setLoading(true)
-      const [usersData, turnsData, preferencesData, holidaysData, statsData] = await Promise.all([
+      const [usersData, turnsData, preferencesData, holidaysData, statsData, configData] = await Promise.all([
         getUsers(),
         getTurns(),
         getPreferences(),
         getHolidays(),
-        getStats()
+        getStats(),
+        getConfig()
       ])
+      const nextConfig = { ...DEFAULT_CONFIG, ...configData }
 
       setUsers(usersData)
       setTurns(turnsData)
       setPreferences(preferencesData)
       setHolidays(holidaysData)
       setStats(statsData)
+      setConfig(nextConfig)
+      setConfigDraft(nextConfig)
       setError(null)
 
       if (cacheUserId) {
@@ -165,6 +228,7 @@ function App() {
           preferences: preferencesData,
           holidays: holidaysData,
           stats: statsData,
+          config: nextConfig,
           savedAt
         }
         localStorage.setItem(cacheKeyForUser(cacheUserId), JSON.stringify(cacheData))
@@ -179,7 +243,7 @@ function App() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [currentUser?.id, hydrateCachedData])
 
   const handleLogin = async (e: FormEvent) => {
     e.preventDefault()
@@ -232,7 +296,7 @@ function App() {
     } else {
       setLoading(false)
     }
-  }, [])
+  }, [hydrateCachedData, loadData])
 
   const getDaysInMonth = (date: Date) => {
     const year = date.getFullYear()
@@ -278,19 +342,19 @@ function App() {
     const diff = monthDiffFromToday(date)
     const today = new Date()
 
-    if (diff < 1 || diff > 2) {
+    if (diff < 1 || diff > config.mesiFuturiMax) {
       return {
         visible: false,
         editable: false,
-        reason: 'Gli utenti possono gestire solo i prossimi 2 mesi.'
+        reason: `Gli utenti possono gestire solo i prossimi ${config.mesiFuturiMax} mesi.`
       }
     }
 
-    if (diff === 1 && today.getDate() > 15) {
+    if (diff === 1 && today.getDate() > config.giornoFreeze) {
       return {
         visible: true,
         editable: false,
-        reason: 'Mese congelato: le preferenze si chiudono il 15 del mese precedente.'
+        reason: `Mese congelato: le preferenze si chiudono il giorno ${config.giornoFreeze} del mese precedente.`
       }
     }
 
@@ -319,15 +383,17 @@ function App() {
 
   const getPointsForDate = (dateStr: string) => {
     const tipo = getTipoGiornoForDate(dateStr)
-    if (tipo === 'FESTIVO') return 3
-    return 1
+    if (tipo === 'FESTIVO') return config.puntiFestivo
+    if (tipo === 'DOMENICA') return config.puntiDomenica
+    if (tipo === 'SABATO') return config.puntiSabato
+    return 0
   }
 
   const canNavigateMonth = (delta: number) => {
     if (currentUser?.isManager) return true
     const nextMonth = addMonths(currentMonth, delta)
     const diff = monthDiffFromToday(nextMonth)
-    return diff >= 0 && diff <= 2
+    return diff >= 0 && diff <= config.mesiFuturiMax
   }
 
   const navigateMonth = (delta: number) => {
@@ -383,8 +449,18 @@ function App() {
     if (!currentUser?.isManager) return
     const firstUser = activeUsers[0] || users[0]
     setSelectedDate(formatLocalDate(date))
+    setBulkTurnDates([])
     setSelectedUser(firstUser?.id || '')
     setTurnNotes('Forzatura manuale manager')
+    setShowTurnModal(true)
+  }
+
+  const handleOpenBulkTurnModal = () => {
+    if (!currentUser?.isManager || bulkTurnDates.length === 0) return
+    const firstUser = activeUsers[0] || users[0]
+    setSelectedDate(bulkTurnDates[0] || '')
+    setSelectedUser(firstUser?.id || '')
+    setTurnNotes('Forzatura multipla manager')
     setShowTurnModal(true)
   }
 
@@ -399,24 +475,29 @@ function App() {
         return
       }
 
-      const tipoGiorno = getTipoGiornoForDate(selectedDate)
-      const punti = getPointsForDate(selectedDate)
+      const datesToForce = bulkTurnDates.length > 0 ? bulkTurnDates : [selectedDate]
 
-      await addTurn({
-        data: selectedDate,
-        idTecnico: user.id,
-        tecnicoNome: `${user.nome} ${user.cognome}`,
-        tipoGiorno,
-        punti,
-        note: turnNotes || 'Forzatura manuale manager'
-      })
+      for (const data of datesToForce) {
+        const tipoGiorno = getTipoGiornoForDate(data)
+        const punti = getPointsForDate(data)
+
+        await addTurn({
+          data,
+          idTecnico: user.id,
+          tecnicoNome: `${user.nome} ${user.cognome}`,
+          tipoGiorno,
+          punti,
+          note: turnNotes || (datesToForce.length > 1 ? 'Forzatura multipla manager' : 'Forzatura manuale manager')
+        })
+      }
 
       setShowTurnModal(false)
       setSelectedDate('')
+      setBulkTurnDates([])
       setSelectedUser('')
       setTurnNotes('')
       await loadData()
-      alert('Turno forzato manualmente.')
+      alert(datesToForce.length > 1 ? `${datesToForce.length} turni forzati manualmente.` : 'Turno forzato manualmente.')
     } catch (err) {
       alert('Errore forzatura turno: ' + (err instanceof Error ? err.message : 'errore sconosciuto'))
     }
@@ -430,6 +511,30 @@ function App() {
       await loadData()
     } catch (err) {
       alert('Errore: ' + (err instanceof Error ? err.message : 'errore sconosciuto'))
+    }
+  }
+
+  const handleToggleTurnSelection = (data: string) => {
+    setBulkTurnDates(prev => prev.includes(data) ? prev.filter(item => item !== data) : [...prev, data])
+  }
+
+  const handleToggleAllTurns = () => {
+    setBulkTurnDates(allAssignedTurnsSelected ? [] : assignedTurns.map(turn => turn.data))
+  }
+
+  const handleDeleteSelectedTurns = async () => {
+    if (!currentUser?.isManager || bulkTurnDates.length === 0) return
+    if (!confirm(`Eliminare ${bulkTurnDates.length} turni selezionati?`)) return
+
+    try {
+      for (const data of bulkTurnDates) {
+        await deleteTurn(data)
+      }
+      setBulkTurnDates([])
+      await loadData()
+      alert('Turni selezionati eliminati.')
+    } catch (err) {
+      alert('Errore eliminazione multipla: ' + (err instanceof Error ? err.message : 'errore sconosciuto'))
     }
   }
 
@@ -561,6 +666,35 @@ function App() {
     }
   }
 
+  const handleResetPoints = async () => {
+    if (!confirm('Azzerare punti e ultimo turno di tutti gli utenti?')) return
+    try {
+      await resetPoints()
+      alert('Punti azzerati!')
+      loadData()
+    } catch (err) {
+      alert('Errore azzeramento punti: ' + (err instanceof Error ? err.message : 'errore sconosciuto'))
+    }
+  }
+
+  const handleSaveConfig = async () => {
+    if (!currentUser?.isManager) return
+    try {
+      const saved = await apiUpdateConfig(configDraft)
+      const next = { ...DEFAULT_CONFIG, ...saved }
+      setConfig(next)
+      setConfigDraft(next)
+      await loadData()
+      alert('Configurazione aggiornata dal foglio.')
+    } catch (err) {
+      alert('Errore configurazione: ' + (err instanceof Error ? err.message : 'errore sconosciuto'))
+    }
+  }
+
+  const updateConfigDraftNumber = (key: keyof Config, value: string) => {
+    setConfigDraft(prev => ({ ...prev, [key]: Number(value) }))
+  }
+
   const handleChangePin = async () => {
     if (!pinToChange.userId || !pinToChange.newPin) return
     if (!/^\d{4}$/.test(pinToChange.newPin)) {
@@ -690,7 +824,7 @@ function App() {
           <div className="calendar-view">
             {!currentUser?.isManager && (
               <p className="window-note">
-                Utente base: calendario limitato a mese corrente + 2 mesi. Le preferenze del mese successivo si congelano dopo il giorno 15.
+                Utente base: calendario limitato a mese corrente + {config.mesiFuturiMax} mesi. Le preferenze del mese successivo si congelano dopo il giorno {config.giornoFreeze}.
               </p>
             )}
             <div className="calendar-header">
@@ -705,7 +839,7 @@ function App() {
               <span className="legend-item"><span className="legend-color rosso"></span> Rosso</span>
             </div>
             {lastCacheAt && <p className="cache-note">Cache locale attiva · ultimo aggiornamento {new Date(lastCacheAt).toLocaleString('it-IT')}</p>}
-            {!currentUser?.isManager && monthDiff === 1 && new Date().getDate() > 15 && (
+            {!currentUser?.isManager && monthDiff === 1 && new Date().getDate() > config.giornoFreeze && (
               <p className="lock-note">🔒 Questo mese è congelato per gli utenti base. Il manager può ancora forzare i turni.</p>
             )}
             <div className="calendar-grid">
@@ -762,7 +896,7 @@ function App() {
           <div className="preferences-view">
             <h2>🎨 Le Tue Preferenze</h2>
             <p className="info-text">
-              Gli utenti base compilano solo i prossimi 2 mesi. Dopo il 15 si blocca il mese successivo e resta modificabile quello dopo.
+              Gli utenti base compilano solo i prossimi {config.mesiFuturiMax} mesi. Dopo il giorno {config.giornoFreeze} si blocca il mese successivo e restano modificabili i mesi successivi consentiti.
             </p>
             <div className="calendar-header mini-month-header">
               <button onClick={() => navigateMonth(-1)} disabled={!canNavigateMonth(-1)}>←</button>
@@ -830,13 +964,58 @@ function App() {
             <div className="view-header">
               <h2>📋 Turni</h2>
             </div>
+            <div className="turn-balance-panel">
+              <div>
+                <strong>Bilanciamento turni</strong>
+                <p>Scarto punti tra tecnico più carico e meno carico: <strong>{balanceGap}</strong>.</p>
+              </div>
+              <div className="turn-balance-list">
+                {turnBalance.map(item => (
+                  <span key={item.id} className="turn-balance-chip">
+                    {item.nome}: {item.turni} turni · {item.punti} pt
+                  </span>
+                ))}
+              </div>
+            </div>
+            {currentUser?.isManager && (
+              <div className="turns-bulk-actions">
+                <span>{selectedAssignedTurnCount} turni assegnati selezionati</span>
+                <button className="secondary-action" onClick={handleToggleAllTurns}>
+                  {allAssignedTurnsSelected ? 'Deseleziona tutto' : 'Seleziona tutto'}
+                </button>
+                <button className="success-action" disabled={selectedAssignedTurnCount === 0} onClick={handleOpenBulkTurnModal}>↯ Forza selezionati</button>
+                <button className="danger-action" disabled={selectedAssignedTurnCount === 0} onClick={handleDeleteSelectedTurns}>Elimina selezionati</button>
+              </div>
+            )}
             <table className="turns-table">
               <thead>
-                <tr><th>Data</th><th>Giorno</th><th>Tipo</th><th>Tecnico</th><th>Punti</th>{currentUser?.isManager && <th>Azioni</th>}</tr>
+                <tr>
+                  {currentUser?.isManager && (
+                    <th>
+                      <input
+                        type="checkbox"
+                        checked={allAssignedTurnsSelected}
+                        onChange={handleToggleAllTurns}
+                        aria-label="Seleziona tutti i turni"
+                      />
+                    </th>
+                  )}
+                  <th>Data</th><th>Giorno</th><th>Tipo</th><th>Tecnico</th><th>Punti</th>{currentUser?.isManager && <th>Azioni</th>}
+                </tr>
               </thead>
               <tbody>
-                {turns.filter(t => t.statoTurno === 'ASSEGNATO').sort((a, b) => parseLocalDate(a.data).getTime() - parseLocalDate(b.data).getTime()).map(turn => (
+                {assignedTurns.map(turn => (
                   <tr key={turn.data}>
+                    {currentUser?.isManager && (
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={selectedTurnDatesSet.has(turn.data)}
+                          onChange={() => handleToggleTurnSelection(turn.data)}
+                          aria-label={`Seleziona turno del ${turn.data}`}
+                        />
+                      </td>
+                    )}
                     <td>{parseLocalDate(turn.data).toLocaleDateString('it-IT')}</td>
                     <td>{turn.giorno}</td>
                     <td><span className={`turn-type ${turn.tipoGiorno.toLowerCase()}`}>{turn.tipoGiorno}</span></td>
@@ -870,6 +1049,11 @@ function App() {
                 <button className="primary-btn" onClick={handleUpdatePoints}>Aggiorna</button>
               </div>
               <div className="manager-card">
+                <h3>🧹 Azzera Punti</h3>
+                <p>Azzera punti e ultimo turno in Anagrafica senza eliminare i turni dal calendario.</p>
+                <button className="primary-btn danger-primary" onClick={handleResetPoints}>Azzera punti</button>
+              </div>
+              <div className="manager-card">
                 <h3>↯ Forzatura Manuale</h3>
                 <p>Dal calendario premi ↯ o ✎ su sabati, domeniche e festivi per scegliere il tecnico.</p>
                 <button className="primary-btn" onClick={() => setActiveTab('calendar')}>Apri Calendario</button>
@@ -896,6 +1080,20 @@ function App() {
                 </div>
               </div>
             )}
+            <div className="config-box">
+              <h3>⚙️ Configurazione foglio</h3>
+              <p className="config-help">Questi valori vengono letti e salvati nel foglio “Configurazione” e guidano calendario, punti, freeze e algoritmo.</p>
+              <div className="config-grid">
+                <label>Pausa minima giorni<input type="number" min="0" value={configDraft.pausaMinima} onChange={e => updateConfigDraftNumber('pausaMinima', e.target.value)} /></label>
+                <label>Punti sabato<input type="number" min="0" value={configDraft.puntiSabato} onChange={e => updateConfigDraftNumber('puntiSabato', e.target.value)} /></label>
+                <label>Punti domenica<input type="number" min="0" value={configDraft.puntiDomenica} onChange={e => updateConfigDraftNumber('puntiDomenica', e.target.value)} /></label>
+                <label>Punti festivo<input type="number" min="0" value={configDraft.puntiFestivo} onChange={e => updateConfigDraftNumber('puntiFestivo', e.target.value)} /></label>
+                <label>Giorno freeze<input type="number" min="1" max="31" value={configDraft.giornoFreeze} onChange={e => updateConfigDraftNumber('giornoFreeze', e.target.value)} /></label>
+                <label>Mesi futuri max<input type="number" min="1" max="12" value={configDraft.mesiFuturiMax} onChange={e => updateConfigDraftNumber('mesiFuturiMax', e.target.value)} /></label>
+                <label>Inizio calendario<input type="date" value={configDraft.calendarioStart} onChange={e => setConfigDraft(prev => ({ ...prev, calendarioStart: e.target.value }))} /></label>
+              </div>
+              <button className="primary-btn" onClick={handleSaveConfig}>Salva configurazione</button>
+            </div>
           </div>
         )}
 
@@ -922,9 +1120,16 @@ function App() {
       {showTurnModal && (
         <div className="modal-overlay" onClick={() => setShowTurnModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
-            <h3>↯ Forza Turno Manuale</h3>
+            <h3>↯ {bulkTurnDates.length > 0 ? 'Forza Turni Selezionati' : 'Forza Turno Manuale'}</h3>
             <form onSubmit={handleAddTurn}>
-              <div className="form-group"><label>Data</label><input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} required /></div>
+              {bulkTurnDates.length > 0 ? (
+                <div className="form-group">
+                  <label>Turni selezionati</label>
+                  <p className="bulk-selection-summary">{bulkTurnDates.length} date: {bulkTurnDates.join(', ')}</p>
+                </div>
+              ) : (
+                <div className="form-group"><label>Data</label><input type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} required /></div>
+              )}
               <div className="form-group">
                 <label>Tecnico</label>
                 <select value={selectedUser} onChange={e => setSelectedUser(e.target.value)} required>
@@ -935,7 +1140,7 @@ function App() {
               <div className="form-group"><label>Note</label><input type="text" value={turnNotes} onChange={e => setTurnNotes(e.target.value)} /></div>
               <div className="modal-actions">
                 <button type="button" onClick={() => setShowTurnModal(false)}>Annulla</button>
-                <button type="submit" className="primary">Forza turno</button>
+                <button type="submit" className="primary">{bulkTurnDates.length > 0 ? 'Forza turni' : 'Forza turno'}</button>
               </div>
             </form>
           </div>

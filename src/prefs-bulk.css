@@ -415,6 +415,20 @@
     gap: 0.75rem;
   }
 
+  .turn-balance-panel,
+  .turns-bulk-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .turn-balance-list {
+    justify-content: flex-start;
+  }
+
+  .turns-bulk-actions button {
+    width: 100%;
+  }
+
   .users-table,
   .turns-table,
   .log-table {

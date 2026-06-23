@@ -53,6 +53,7 @@ function doPost(e) {
       case 'clearPreferencesForUser': return jsonResponse(Preferenze_clearPreferencesForUser(data, userId));
       case 'calculateTurni': return jsonResponse(Algoritmo_calculateTurniAutomatici(userId));
       case 'updatePoints': return jsonResponse(Algoritmo_updatePoints(userId));
+      case 'resetPoints': return jsonResponse(Anagrafica_resetPoints(userId));
       case 'updateConfig': return jsonResponse(Config_updateConfig(data, userId));
       case 'changePin': return jsonResponse(Auth_changePin(data, userId));
       case 'resetPin': return jsonResponse(Auth_resetPin(data, userId));
@@ -110,6 +111,7 @@ function Anagrafica_getUsers() { return Anagrafica_getUsersInternal(); }
 function Anagrafica_addUser(data, userId) { return Anagrafica_addUserInternal(data, userId); }
 function Anagrafica_updateUser(data, userId) { return Anagrafica_updateUserInternal(data, userId); }
 function Anagrafica_setUserStatus(data, userId) { return Anagrafica_setUserStatusInternal(data.id, data.stato, userId, data.motivo); }
+function Anagrafica_resetPoints(userId) { return Anagrafica_resetPointsInternal(userId); }
 
 function Calendario_getTurns() { return Calendario_getTurnsInternal(); }
 function Calendario_addTurn(data, userId) { return Calendario_addTurnInternal(data, userId); }

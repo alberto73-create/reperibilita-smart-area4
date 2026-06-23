@@ -32,15 +32,15 @@ export interface Preference {
 }
 
 export interface Config {
-  Pausa_Minima_Giorni: number;
-  Punti_Sabato: number;
-  Punti_Domenica: number;
-  Punti_Festivo: number;
-  Giorno_Freeze: number;
-  Mesi_Futuri_Min: number;
-  Mesi_Futuri_Max: number;
-  Manager_Email: string;
-  Ultimo_Calcolo: string;
+  pausaMinima: number;
+  puntiSabato: number;
+  puntiDomenica: number;
+  puntiFestivo: number;
+  giornoFreeze: number;
+  mesiFuturiMax: number;
+  calendarioStart: string;
+  managerEmail: string;
+  ultimoCalcolo: string;
 }
 
 export interface Holiday {

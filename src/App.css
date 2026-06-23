@@ -500,6 +500,64 @@ body {
   border-collapse: collapse;
 }
 
+.turn-balance-panel,
+.turns-bulk-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 1rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+  color: #334155;
+}
+
+.turn-balance-panel p {
+  margin-top: 0.25rem;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.turn-balance-list {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.turn-balance-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.35rem 0.55rem;
+  border-radius: 999px;
+  background: white;
+  border: 1px solid #cbd5e1;
+  color: #334155;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.turns-bulk-actions button {
+  border: none;
+  border-radius: 10px;
+  padding: 0.65rem 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.turns-bulk-actions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.turns-table input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  cursor: pointer;
+}
+
 .users-table th, .turns-table th, .log-table th {
   background: #f5f5f5;
   padding: 0.75rem;
@@ -553,6 +611,16 @@ body {
   padding: 0.4rem 0.8rem;
   border-radius: 4px;
   cursor: pointer;
+}
+
+.bulk-selection-summary {
+  margin: 0;
+  padding: 0.75rem;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 0.9rem;
+  line-height: 1.35;
 }
 
 .turn-type {
@@ -621,6 +689,14 @@ body {
   cursor: not-allowed;
 }
 
+.danger-primary {
+  background: #dc2626;
+}
+
+.danger-primary:hover {
+  background: #b91c1c;
+}
+
 .result-box {
   margin-top: 1rem;
   padding: 1rem;
@@ -640,6 +716,46 @@ body {
   border: 2px solid #e5e7eb;
   border-radius: 12px;
   padding: 1.5rem;
+}
+
+.config-box {
+  margin-top: 2rem;
+  background: #f9fafb;
+  border: 2px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 1.5rem;
+}
+
+.config-box h3 {
+  color: #333;
+  margin-bottom: 0.5rem;
+}
+
+.config-help {
+  color: #666;
+  margin-bottom: 1rem;
+}
+
+.config-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.config-grid label {
+  color: #333;
+  font-weight: 600;
+}
+
+.config-grid input {
+  width: 100%;
+  margin-top: 0.35rem;
+  padding: 0.65rem;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  background: white;
+  color: #111827;
 }
 
 .stats-box h3 {
