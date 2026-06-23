@@ -740,6 +740,7 @@ function doGet(e) {
       case 'getUsers': return jsonResponse(Anagrafica_getUsersInternal());
       case 'getTurns': return jsonResponse(Calendario_getTurnsInternal());
       case 'getPreferences': return jsonResponse(Preferenze_getPreferencesInternal());
+      case 'getHolidays': return jsonResponse(getHolidays());
       case 'getLog': return jsonResponse(Log_getLogInternal());
       case 'getStats': return jsonResponse(getStats(userId));
       default: return jsonResponse({ success: false, error: 'Azione non valida: ' + action });
@@ -828,6 +829,42 @@ function getStats(userId) {
       turniDaCoprire: turns.filter(t => !t.statoTurno || t.statoTurno === '').length
     };
     return { success: true, stats: stats };
+  } catch (error) {
+    return { success: false, error: error.toString() };
+  }
+}
+
+function getHolidays() {
+  try {
+    const today = new Date();
+    const holidays = [];
+    const startYear = today.getFullYear();
+    const endYear = startYear + 1;
+    const fixedHolidays = [
+      { month: 0, day: 1, nome: 'Capodanno' },
+      { month: 0, day: 6, nome: 'Epifania' },
+      { month: 3, day: 25, nome: 'Festa della Liberazione' },
+      { month: 4, day: 1, nome: 'Festa dei Lavoratori' },
+      { month: 5, day: 2, nome: 'Festa della Repubblica' },
+      { month: 7, day: 15, nome: 'Ferragosto' },
+      { month: 10, day: 1, nome: 'Ognissanti' },
+      { month: 11, day: 8, nome: 'Immacolata Concezione' },
+      { month: 11, day: 25, nome: 'Natale' },
+      { month: 11, day: 26, nome: 'Santo Stefano' }
+    ];
+
+    for (let year = startYear; year <= endYear; year++) {
+      fixedHolidays.forEach(holiday => {
+        holidays.push({
+          data: formatDate(new Date(year, holiday.month, holiday.day)),
+          nome: holiday.nome,
+          tipo: 'Fissa',
+          anno: year
+        });
+      });
+    }
+
+    return { success: true, holidays: holidays };
   } catch (error) {
     return { success: false, error: error.toString() };
   }

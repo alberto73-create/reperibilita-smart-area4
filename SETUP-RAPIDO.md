@@ -23,7 +23,7 @@
 ## Passo 2: Apps Script API (3 min)
 
 1. Sempre in Apps Script, **cancella tutto** di nuovo
-2. **Copia e incolla** il file `apps-script/Code.gs`
+2. **Copia e incolla** il file `apps-script/Code.gs.COMPLETO.js`
 3. Clicca su **Salva** (💾)
 4. Dai il nome: `Reperibilità API`
 5. **Deploy** → **Nuova distribuzione**
