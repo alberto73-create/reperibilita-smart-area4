@@ -142,7 +142,7 @@ function getStats(userId) {
 
     const stats = {
       totaleUtenti: users.length,
-      utentiAttivi: users.filter(u => u.stato === 'ON').length,
+      utentiAttivi: users.filter(u => String(u.stato || '').trim().toUpperCase() === 'ON').length,
       turniAssegnati: turns.filter(t => t.statoTurno === 'ASSEGNATO').length,
       turniDaCoprire: turns.filter(t => !t.statoTurno || t.statoTurno === '').length
     };

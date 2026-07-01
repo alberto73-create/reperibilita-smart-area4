@@ -653,7 +653,7 @@ function Algoritmo_calculateTurniAutomaticiInternal(userId) {
     if (!usersResult.success || !turnsResult.success) {
       return { success: false, error: 'Errore nel recupero dati' };
     }
-    const users = usersResult.users.filter(u => u.stato === 'ON');
+    const users = usersResult.users.filter(u => isUserActiveForSmartAssignment(u));
     const allTurns = turnsResult.turns || [];
     const turns = allTurns.filter(t =>
       !t.idTecnico && (t.tipoGiorno === 'SABATO' || t.tipoGiorno === 'DOMENICA' || t.tipoGiorno === 'FESTIVO')
@@ -717,10 +717,27 @@ function Algoritmo_updatePointsInternal(userId) {
   }
 }
 
+
+function normalizeSmartValue(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
+function isUserActiveForSmartAssignment(user) {
+  return normalizeSmartValue(user && user.stato) === 'ON';
+}
+
+function getPreferencePriority(preferenza) {
+  const pref = normalizeSmartValue(preferenza) || 'BIANCO';
+  if (pref === 'VERDE') return 0;
+  if (pref === 'BIANCO') return 1;
+  if (pref === 'GIALLO') return 2;
+  return 3;
+}
+
 function assegnaTurno(turno, users, preferences, config, allTurns) {
   const turnoDate = new Date(turno.data);
   let candidati = users.filter(u => {
-    if (u.stato === 'OFF') return false;
+    if (!isUserActiveForSmartAssignment(u)) return false;
     const turnsForUser = (allTurns || []).filter(t => t.idTecnico === u.id && t.statoTurno === 'ASSEGNATO' && t.data);
     for (const assignedTurn of turnsForUser) {
       const giorniDallTurno = daysBetween(new Date(assignedTurn.data), turnoDate);
@@ -738,12 +755,20 @@ function assegnaTurno(turno, users, preferences, config, allTurns) {
   }
   const punteggiVirtuali = candidati.map(u => {
     const pref = preferenza[u.id] || 'BIANCO';
+    const puntiReali = getSmartRealPointsForTurn(u.id, turnoDate, allTurns);
     let bonusMalus = 0;
     if (pref === 'VERDE') bonusMalus = -2;
     else if (pref === 'GIALLO') bonusMalus = 2;
-    return { user: u, puntiVirtuali: u.punti + bonusMalus, preferenza: pref };
+    return { user: u, puntiReali: puntiReali, puntiVirtuali: puntiReali + bonusMalus, preferenza: pref };
   });
-  punteggiVirtuali.sort((a, b) => a.puntiVirtuali - b.puntiVirtuali);
+  punteggiVirtuali.sort((a, b) => {
+    if (a.puntiVirtuali !== b.puntiVirtuali) return a.puntiVirtuali - b.puntiVirtuali;
+    const prefDelta = getPreferencePriority(a.preferenza) - getPreferencePriority(b.preferenza);
+    if (prefDelta !== 0) return prefDelta;
+    const aLast = a.user.ultimoTurno || '0000-00-00';
+    const bLast = b.user.ultimoTurno || '0000-00-00';
+    return aLast.localeCompare(bLast);
+  });
   const vincitore = punteggiVirtuali[0];
   let punti = 0;
   if (turno.tipoGiorno === 'FESTIVO') punti = config.puntiFestivo;
@@ -751,8 +776,21 @@ function assegnaTurno(turno, users, preferences, config, allTurns) {
   else if (turno.tipoGiorno === 'SABATO') punti = config.puntiSabato;
   return {
     success: true, idTecnico: vincitore.user.id, tecnicoNome: vincitore.user.nome + ' ' + vincitore.user.cognome,
-    punti: punti, puntiReali: vincitore.user.punti, punteggioVirtuale: vincitore.puntiVirtuali, preferenza: vincitore.preferenza
+    punti: punti, puntiReali: vincitore.puntiReali, punteggioVirtuale: vincitore.puntiVirtuali, preferenza: vincitore.preferenza
   };
+}
+
+
+function getSmartRealPointsForTurn(idTecnico, turnoDate, allTurns) {
+  const monthStart = new Date(turnoDate.getFullYear(), turnoDate.getMonth(), 1);
+  return (allTurns || []).reduce((totale, assignedTurn) => {
+    if (assignedTurn.idTecnico !== idTecnico || assignedTurn.statoTurno !== 'ASSEGNATO' || !assignedTurn.data) {
+      return totale;
+    }
+    const assignedDate = new Date(assignedTurn.data);
+    if (assignedDate >= monthStart) return totale;
+    return totale + (parseFloat(assignedTurn.puntiAssegnati) || 0);
+  }, 0);
 }
 
 function getPreferenzaPerData(users, data, preferences) {
@@ -764,7 +802,7 @@ function getPreferenzaPerData(users, data, preferences) {
   const dataStr = formatDate(data);
   users.forEach(u => {
     const pref = preferences.find(p => p.idTecnico === u.id && p.data === dataStr);
-    result[u.id] = pref ? pref.preferenza : 'BIANCO';
+    result[u.id] = pref ? normalizeSmartValue(pref.preferenza) : 'BIANCO';
   });
   return result;
 }
