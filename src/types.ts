@@ -61,6 +61,22 @@ export interface LogEntry {
   dettagli: string;
 }
 
+export interface DbHealth {
+  dbRaggiungibile: boolean;
+  spreadsheetName?: string;
+  checkedAt: string;
+  sheets?: Record<string, { exists: boolean; rows: number }>;
+  counts?: {
+    utenti: number;
+    utentiAttivi: number;
+    turniTotali: number;
+    turniDaCoprire: number;
+    turniAssegnati: number;
+  };
+  config?: Config | null;
+  warnings: string[];
+}
+
 export interface Stats {
   totaleUtenti: number;
   utentiAttivi: number;

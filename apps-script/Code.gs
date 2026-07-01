@@ -23,6 +23,7 @@ function doGet(e) {
       case 'getConfig': return jsonResponse(Config_getConfig(userId));
       case 'getLog': return jsonResponse(Log_getLog());
       case 'getStats': return jsonResponse(getStats(userId));
+      case 'getHealth': return jsonResponse(getHealth(userId));
       default: return jsonResponse({ success: false, error: 'Azione non valida: ' + action });
     }
   } catch (error) {
@@ -150,6 +151,68 @@ function getStats(userId) {
     return { success: true, stats: stats };
   } catch (error) {
     return { success: false, error: error.toString() };
+  }
+}
+
+function getHealth(userId) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const requiredSheets = ['Auth', 'Anagrafica', 'Calendario', 'Preferenze_Colori', 'Configurazione', 'Log_IA'];
+    const sheets = {};
+
+    requiredSheets.forEach(name => {
+      const sheet = ss.getSheetByName(name);
+      sheets[name] = {
+        exists: Boolean(sheet),
+        rows: sheet ? Math.max(sheet.getLastRow() - 1, 0) : 0
+      };
+    });
+
+    const usersResult = Anagrafica_getUsersInternal();
+    const turnsResult = Calendario_getTurnsInternal();
+    const configResult = Config_getConfigInternal(userId);
+    const users = usersResult.success ? usersResult.users : [];
+    const turns = turnsResult.success ? turnsResult.turns : [];
+    const relevantTurns = turns.filter(t => t.tipoGiorno === 'SABATO' || t.tipoGiorno === 'DOMENICA' || t.tipoGiorno === 'FESTIVO');
+    const turniDaCoprire = relevantTurns.filter(t => !t.idTecnico && !t.statoTurno).length;
+    const turniAssegnati = relevantTurns.filter(t => t.statoTurno === 'ASSEGNATO' && t.idTecnico).length;
+    const warnings = [];
+
+    if (!usersResult.success) warnings.push('Anagrafica non leggibile: ' + usersResult.error);
+    if (!turnsResult.success) warnings.push('Calendario non leggibile: ' + turnsResult.error);
+    if (!configResult.success) warnings.push('Configurazione non leggibile: ' + configResult.error);
+    if (usersResult.success && users.length === 0) warnings.push('Nessun utente trovato in Anagrafica.');
+    if (turnsResult.success && relevantTurns.length === 0) warnings.push('Calendario operativo vuoto: non ci sono sabati, domeniche o festivi nella finestra configurata.');
+    if (turnsResult.success && relevantTurns.length > 0 && turniDaCoprire === 0) warnings.push('Nessun turno scoperto da assegnare nella finestra calendario corrente.');
+
+    return {
+      success: true,
+      health: {
+        dbRaggiungibile: true,
+        spreadsheetName: ss.getName(),
+        checkedAt: new Date().toISOString(),
+        sheets: sheets,
+        counts: {
+          utenti: users.length,
+          utentiAttivi: users.filter(u => String(u.stato || '').trim().toUpperCase() === 'ON').length,
+          turniTotali: relevantTurns.length,
+          turniDaCoprire: turniDaCoprire,
+          turniAssegnati: turniAssegnati
+        },
+        config: configResult.success ? configResult.config : null,
+        warnings: warnings
+      }
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.toString(),
+      health: {
+        dbRaggiungibile: false,
+        checkedAt: new Date().toISOString(),
+        warnings: ['Backend raggiunto, ma foglio non accessibile: ' + error.toString()]
+      }
+    };
   }
 }
 
