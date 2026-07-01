@@ -220,11 +220,17 @@ function logAuth(azione, targetUserId, actorUserId, dettagli) {
 // ANAGRAFICA.GS
 // ============================================================================
 
+/**
+ * Anagrafica.gs - Gestione Utenti
+ * CRUD utenti, stati, punti
+ */
+
 const SHEET_ANAGRAFICA = 'Anagrafica';
 
 function initAnagrafica() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName(SHEET_ANAGRAFICA);
+
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_ANAGRAFICA);
     const headers = ['ID', 'Nome', 'Cognome', 'Email', 'Stato', 'Punti_Totali', 'Ultimo_Turno', 'Data_Assunzione', 'Note'];
@@ -233,15 +239,15 @@ function initAnagrafica() {
     sheet.getRange(1, 1, 1, headers.length).setBackground('#4285f4');
     sheet.getRange(1, 1, 1, headers.length).setFontColor('white');
     sheet.setFrozenRows(1);
+
     const sampleData = [
       ['USR001', 'Mario', 'Rossi', 'mario.rossi@azienda.com', 'ON', 0, '', '', ''],
       ['USR002', 'Luca', 'Bianchi', 'luca.bianchi@azienda.com', 'ON', 0, '', '', ''],
       ['USR003', 'Anna', 'Verdi', 'anna.verdi@azienda.com', 'ON', 0, '', '', ''],
       ['USR004', 'Giulia', 'Neri', 'giulia.neri@azienda.com', 'ON', 0, '', '', ''],
     ];
-    if (sampleData.length > 0) {
-      sheet.getRange(2, 1, sampleData.length, headers.length).setValues(sampleData);
-    }
+
+    sheet.getRange(2, 1, sampleData.length, headers.length).setValues(sampleData);
     sheet.setColumnWidth(1, 80);
     sheet.setColumnWidth(2, 120);
     sheet.setColumnWidth(3, 120);
@@ -251,21 +257,42 @@ function initAnagrafica() {
     sheet.setColumnWidth(7, 100);
     sheet.setColumnWidth(8, 100);
     sheet.setColumnWidth(9, 200);
+
     const rule = SpreadsheetApp.newDataValidation().requireValueInList(['ON', 'OFF'], true).build();
     sheet.getRange('E2:E').setDataValidation(rule);
   }
+
   return sheet;
+}
+
+function Anagrafica_isManagerUser(userId) {
+  try {
+    const sheet = getSheetOrInit('Auth');
+    const rows = sheet.getDataRange().getValues();
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i][0] === userId && rows[i][3] === 'MANAGER') return true;
+    }
+  } catch (e) {}
+  return false;
 }
 
 function Anagrafica_getUsersInternal() {
   try {
     const sheet = initAnagrafica();
     const rows = getDataRows(sheet);
+
     const users = rows.map(r => ({
-      id: r[0], nome: r[1], cognome: r[2], email: r[3], stato: r[4],
-      punti: parseFloat(r[5]) || 0, ultimoTurno: r[6] ? formatDate(r[6]) : '',
-      dataAssunzione: r[7] ? formatDate(r[7]) : '', note: r[8] || ''
+      id: r[0],
+      nome: r[1],
+      cognome: r[2],
+      email: r[3],
+      stato: r[4],
+      punti: parseFloat(r[5]) || 0,
+      ultimoTurno: r[6] ? formatDate(r[6]) : '',
+      dataAssunzione: r[7] ? formatDate(r[7]) : '',
+      note: r[8] || ''
     }));
+
     return { success: true, users: users };
   } catch (error) {
     return { success: false, error: error.toString() };
@@ -274,11 +301,28 @@ function Anagrafica_getUsersInternal() {
 
 function Anagrafica_addUserInternal(data, userId) {
   try {
+    if (!Anagrafica_isManagerUser(userId)) {
+      return { success: false, error: 'Solo un manager può aggiungere utenti' };
+    }
+
     const sheet = initAnagrafica();
     const id = data.id || 'USR' + Date.now();
-    sheet.appendRow([id, data.nome, data.cognome, data.email, data.stato || 'ON', 0, '', data.dataAssunzione || new Date(), data.note || '']);
+
+    sheet.appendRow([
+      id,
+      data.nome,
+      data.cognome,
+      data.email,
+      data.stato || 'ON',
+      0,
+      '',
+      data.dataAssunzione || new Date(),
+      data.note || ''
+    ]);
+
     addToAuth(id, data.email, data.nome + ' ' + data.cognome);
     logAction('ANAGRAFICA', 'ADD_USER', id, userId, 'Utente aggiunto: ' + data.nome + ' ' + data.cognome);
+
     return { success: true, user: { id, ...data }, message: 'Utente aggiunto con successo' };
   } catch (error) {
     return { success: false, error: error.toString() };
@@ -287,20 +331,30 @@ function Anagrafica_addUserInternal(data, userId) {
 
 function Anagrafica_updateUserInternal(data, userId) {
   try {
+    if (!Anagrafica_isManagerUser(userId)) {
+      return { success: false, error: 'Solo un manager può modificare gli utenti' };
+    }
+
     const sheet = initAnagrafica();
     const rows = sheet.getDataRange().getValues();
+
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === data.id) {
         const row = i + 1;
-        if (data.nome) sheet.getRange(row, 2).setValue(data.nome);
-        if (data.cognome) sheet.getRange(row, 3).setValue(data.cognome);
-        if (data.email) sheet.getRange(row, 4).setValue(data.email);
-        if (data.stato) sheet.getRange(row, 5).setValue(data.stato);
-        if (data.note) sheet.getRange(row, 9).setValue(data.note);
+        if (data.nome !== undefined) sheet.getRange(row, 2).setValue(data.nome);
+        if (data.cognome !== undefined) sheet.getRange(row, 3).setValue(data.cognome);
+        if (data.email !== undefined) sheet.getRange(row, 4).setValue(data.email);
+        if (data.stato !== undefined) sheet.getRange(row, 5).setValue(data.stato);
+        if (data.punti !== undefined) sheet.getRange(row, 6).setValue(parseFloat(data.punti) || 0);
+        if (data.ultimoTurno !== undefined) sheet.getRange(row, 7).setValue(data.ultimoTurno);
+        if (data.dataAssunzione !== undefined) sheet.getRange(row, 8).setValue(data.dataAssunzione);
+        if (data.note !== undefined) sheet.getRange(row, 9).setValue(data.note);
+
         logAction('ANAGRAFICA', 'UPDATE_USER', data.id, userId, 'Utente aggiornato');
         return { success: true, message: 'Utente aggiornato' };
       }
     }
+
     return { success: false, error: 'Utente non trovato' };
   } catch (error) {
     return { success: false, error: error.toString() };
@@ -309,8 +363,13 @@ function Anagrafica_updateUserInternal(data, userId) {
 
 function Anagrafica_setUserStatusInternal(id, stato, userId, motivo) {
   try {
+    if (!Anagrafica_isManagerUser(userId)) {
+      return { success: false, error: 'Solo un manager può cambiare lo stato utenti' };
+    }
+
     const sheet = initAnagrafica();
     const rows = sheet.getDataRange().getValues();
+
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === id) {
         const row = i + 1;
@@ -319,7 +378,27 @@ function Anagrafica_setUserStatusInternal(id, stato, userId, motivo) {
         return { success: true, message: 'Stato aggiornato' };
       }
     }
+
     return { success: false, error: 'Utente non trovato' };
+  } catch (error) {
+    return { success: false, error: error.toString() };
+  }
+}
+
+function Anagrafica_resetPointsInternal(userId) {
+  try {
+    if (!Anagrafica_isManagerUser(userId)) {
+      return { success: false, error: 'Solo un manager può azzerare i punteggi' };
+    }
+
+    const sheet = initAnagrafica();
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) return { success: true, message: 'Nessun utente da aggiornare' };
+
+    sheet.getRange(2, 6, lastRow - 1, 1).setValue(0);
+    sheet.getRange(2, 7, lastRow - 1, 1).clearContent();
+    logAction('ANAGRAFICA', 'RESET_POINTS', '', userId, 'Punti e ultimo turno azzerati');
+    return { success: true, message: 'Punti azzerati' };
   } catch (error) {
     return { success: false, error: error.toString() };
   }
@@ -329,6 +408,7 @@ function aggiornaPuntiUtente(idTecnico, punti, dataTurno) {
   try {
     const sheet = initAnagrafica();
     const rows = sheet.getDataRange().getValues();
+
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === idTecnico) {
         const attuali = parseFloat(rows[i][5]) || 0;
@@ -338,6 +418,7 @@ function aggiornaPuntiUtente(idTecnico, punti, dataTurno) {
         break;
       }
     }
+
     return true;
   } catch (error) {
     Logger.log('Errore aggiornaPuntiUtente: ' + error.toString());
@@ -354,39 +435,20 @@ function addToAuth(userId, email, nome) {
   }
 }
 
-function logAction(modulo, azione, targetId, actorId, dettagli) {
-  try {
-    const sheet = getSheetOrInit('Log_Azioni');
-    if (sheet.getLastRow() === 0) {
-      sheet.getRange(1, 1, 1, 6).setValues([['Timestamp', 'Modulo', 'Azione', 'Target_ID', 'Actor_ID', 'Dettagli']]);
-    }
-    sheet.appendRow([new Date(), modulo, azione, targetId, actorId, dettagli]);
-  } catch (e) {}
-}
-
-function Anagrafica_resetPointsInternal(userId) {
-  try {
-    const sheet = initAnagrafica();
-    const lastRow = sheet.getLastRow();
-    if (lastRow < 2) return { success: true, message: 'Nessun utente da aggiornare' };
-    sheet.getRange(2, 6, lastRow - 1, 1).setValue(0);
-    sheet.getRange(2, 7, lastRow - 1, 1).clearContent();
-    logAction('ANAGRAFICA', 'RESET_POINTS', '', userId, 'Punti e ultimo turno azzerati');
-    return { success: true, message: 'Punti azzerati' };
-  } catch (error) {
-    return { success: false, error: error.toString() };
-  }
-}
-
 // ============================================================================
 // CALENDARIO.GS
 // ============================================================================
+
+/**
+ * Calendario.gs - Gestione Turni e Date
+ */
 
 const SHEET_CALENDARIO = 'Calendario';
 
 function initCalendario() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName(SHEET_CALENDARIO);
+
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_CALENDARIO);
     const headers = ['Data', 'Giorno', 'Tipo_Giorno', 'Tecnico_Assegnato', 'ID_Tecnico', 'Stato_Turno', 'Punti_Assegnati', 'Note'];
@@ -395,28 +457,46 @@ function initCalendario() {
     sheet.getRange(1, 1, 1, headers.length).setBackground('#0f9d58');
     sheet.getRange(1, 1, 1, headers.length).setFontColor('white');
     sheet.setFrozenRows(1);
-    generaDateFuture(sheet);
   }
+
+  ensureCalendarioWindow(sheet);
   return sheet;
+}
+
+function Calendario_isManagerUser(userId) {
+  try {
+    const sheet = getSheetOrInit('Auth');
+    const rows = sheet.getDataRange().getValues();
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i][0] === userId && rows[i][3] === 'MANAGER') return true;
+    }
+  } catch (e) {}
+  return false;
 }
 
 function Calendario_getTurnsInternal() {
   try {
     const sheet = initCalendario();
     const rows = getDataRows(sheet);
-    const config = getConfigData();
-    const today = new Date();
-    const start = parseDateString(config.calendarioStart || '2026-01-01');
-    const end = new Date(today.getFullYear(), today.getMonth() + (config.mesiFuturiMax || 2) + 1, 0);
-    const turns = rows.map(r => ({
-      data: r[0] ? formatDate(r[0]) : '', giorno: r[1], tipoGiorno: r[2],
-      tecnicoAssegnato: r[3] || '', idTecnico: r[4] || '', statoTurno: r[5] || '',
-      puntiAssegnati: parseFloat(r[6]) || 0, note: r[7] || ''
-    })).filter(t => {
-      if (!t.data) return false;
-      const d = new Date(t.data);
-      return d >= start && d <= end;
-    });
+    const bounds = getCalendarioBounds();
+
+    const turns = rows
+      .map(r => ({
+        data: r[0] ? formatDate(r[0]) : '',
+        giorno: r[1],
+        tipoGiorno: r[2],
+        tecnicoAssegnato: r[3] || '',
+        idTecnico: r[4] || '',
+        statoTurno: r[5] || '',
+        puntiAssegnati: parseFloat(r[6]) || 0,
+        note: r[7] || ''
+      }))
+      .filter(t => {
+        if (!t.data) return false;
+        const d = parseLocalDateForCalendar(t.data);
+        return d >= bounds.start && d <= bounds.end;
+      });
+
     return { success: true, turns: turns };
   } catch (error) {
     return { success: false, error: error.toString() };
@@ -425,31 +505,39 @@ function Calendario_getTurnsInternal() {
 
 function Calendario_addTurnInternal(data, userId) {
   try {
+    if (!Calendario_isManagerUser(userId)) {
+      return { success: false, error: 'Solo un manager può forzare o modificare i turni' };
+    }
+    if (Calendario_isFrozenDate(data.data)) {
+      return { success: false, error: 'Turno congelato dal Giorno_Freeze configurato nel foglio' };
+    }
+
     const sheet = initCalendario();
+    ensureCalendarDateExists(sheet, data.data);
     const rows = sheet.getDataRange().getValues();
+
     for (let i = 1; i < rows.length; i++) {
       if (formatDate(rows[i][0]) === data.data) {
         const row = i + 1;
-        const tipoGiorno = data.tipoGiorno || rows[i][2] || '';
-        const config = getConfigData();
-        let punti = data.punti;
-        if (punti === undefined) {
-          if (tipoGiorno === 'FESTIVO') punti = config.puntiFestivo;
-          else if (tipoGiorno === 'DOMENICA') punti = config.puntiDomenica;
-          else if (tipoGiorno === 'SABATO') punti = config.puntiSabato;
-          else punti = 0;
-        }
+        const tipoGiorno = data.tipoGiorno || rows[i][2] || getTipoGiornoByDate(parseLocalDateForCalendar(data.data));
+        const punti = data.punti !== undefined ? data.punti : getPuntiByTipoGiorno(tipoGiorno);
+
+        sheet.getRange(row, 2).setValue(getNomeGiorno(parseLocalDateForCalendar(data.data).getDay()));
+        sheet.getRange(row, 3).setValue(tipoGiorno);
         sheet.getRange(row, 4).setValue(data.tecnicoNome);
         sheet.getRange(row, 5).setValue(data.idTecnico);
         sheet.getRange(row, 6).setValue('ASSEGNATO');
         sheet.getRange(row, 7).setValue(punti || 0);
-        sheet.getRange(row, 8).setValue(data.note || '');
-        Calendario_addToStorico({ ...data, tipoGiorno: tipoGiorno, punti: punti });
+        sheet.getRange(row, 8).setValue(data.note || 'Forzatura manuale');
+
+        Calendario_upsertStorico({ ...data, tipoGiorno: tipoGiorno, punti: punti });
         Algoritmo_updatePointsInternal(userId);
-        logAction('CALENDARIO', 'ADD_TURN', data.idTecnico, userId, 'Turno aggiunto il ' + data.data);
-        return { success: true, message: 'Turno aggiunto' };
+        logAction('CALENDARIO', 'UPSERT_TURN', data.idTecnico, userId, 'Turno impostato il ' + data.data);
+
+        return { success: true, message: 'Turno impostato' };
       }
     }
+
     return { success: false, error: 'Data non trovata' };
   } catch (error) {
     return { success: false, error: error.toString() };
@@ -458,8 +546,16 @@ function Calendario_addTurnInternal(data, userId) {
 
 function Calendario_deleteTurnInternal(data, userId) {
   try {
+    if (!Calendario_isManagerUser(userId)) {
+      return { success: false, error: 'Solo un manager può eliminare turni' };
+    }
+    if (Calendario_isFrozenDate(data)) {
+      return { success: false, error: 'Turno congelato dal Giorno_Freeze configurato nel foglio' };
+    }
+
     const sheet = initCalendario();
     const rows = sheet.getDataRange().getValues();
+
     for (let i = 1; i < rows.length; i++) {
       if (formatDate(rows[i][0]) === data) {
         const row = i + 1;
@@ -468,38 +564,107 @@ function Calendario_deleteTurnInternal(data, userId) {
         sheet.getRange(row, 6).clearContent();
         sheet.getRange(row, 7).clearContent();
         sheet.getRange(row, 8).clearContent();
+
+        Calendario_removeFromStorico(data);
+        Algoritmo_updatePointsInternal(userId);
         logAction('CALENDARIO', 'DELETE_TURN', '', userId, 'Turno eliminato del ' + data);
         return { success: true, message: 'Turno eliminato' };
       }
     }
+
     return { success: false, error: 'Turno non trovato' };
   } catch (error) {
     return { success: false, error: error.toString() };
   }
 }
 
-function generaDateFuture(sheet) {
+function getCalendarioBounds() {
   const config = getConfigData();
   const today = new Date();
-  const endDate = new Date(today.getFullYear(), today.getMonth() + (config.mesiFuturiMax || 2) + 1, 0);
-  let row = 2;
-  let currentDate = parseDateString(config.calendarioStart || '2026-01-01');
-  while (currentDate <= endDate) {
-    const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
-    for (let day = 1; day <= daysInMonth; day++) {
-      const date = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
-      const dayOfWeek = date.getDay();
-      if (dayOfWeek === 6 || dayOfWeek === 0) {
-        const isHoliday = isFestivo(date);
-        const tipoGiorno = getTipoGiorno(dayOfWeek, isHoliday);
-        sheet.getRange(row, 1).setValue(date);
-        sheet.getRange(row, 2).setValue(getNomeGiorno(dayOfWeek));
-        sheet.getRange(row, 3).setValue(tipoGiorno);
-        row++;
+  const start = parseLocalDateForCalendar(config.calendarioStart || '2026-01-01');
+  const end = new Date(today.getFullYear(), today.getMonth() + (config.mesiFuturiMax || 2) + 1, 0);
+  return { start: start, end: end };
+}
+
+function Calendario_isFrozenDate(dataStr) {
+  const config = getConfigData();
+  const today = new Date();
+  const target = parseLocalDateForCalendar(dataStr);
+  const nextMonthStart = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+  const nextMonthEnd = new Date(today.getFullYear(), today.getMonth() + 2, 0);
+  return today.getDate() >= (config.giornoFreeze || 25) && target >= nextMonthStart && target <= nextMonthEnd;
+}
+
+function ensureCalendarioWindow(sheet) {
+  const bounds = getCalendarioBounds();
+  const rows = sheet.getDataRange().getValues();
+  const existing = {};
+
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][0]) existing[formatDate(rows[i][0])] = true;
+  }
+
+  const newRows = [];
+  const currentDate = new Date(bounds.start);
+
+  while (currentDate <= bounds.end) {
+    const dayOfWeek = currentDate.getDay();
+    const relevant = dayOfWeek === 6 || dayOfWeek === 0 || isFestivo(currentDate);
+
+    if (relevant) {
+      const dataStr = formatDate(currentDate);
+      if (!existing[dataStr]) {
+        newRows.push([
+          new Date(currentDate),
+          getNomeGiorno(dayOfWeek),
+          getTipoGiorno(dayOfWeek, isFestivo(currentDate)),
+          '',
+          '',
+          '',
+          '',
+          ''
+        ]);
       }
     }
-    currentDate.setMonth(currentDate.getMonth() + 1);
+
+    currentDate.setDate(currentDate.getDate() + 1);
   }
+
+  if (newRows.length > 0) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, 8).setValues(newRows);
+  }
+}
+
+function ensureCalendarDateExists(sheet, dataStr) {
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (formatDate(rows[i][0]) === dataStr) return;
+  }
+
+  const date = parseLocalDateForCalendar(dataStr);
+  const dayOfWeek = date.getDay();
+  const relevant = dayOfWeek === 6 || dayOfWeek === 0 || isFestivo(date);
+
+  if (!relevant) {
+    throw new Error('La data deve essere sabato, domenica o festivo');
+  }
+
+  sheet.appendRow([
+    date,
+    getNomeGiorno(dayOfWeek),
+    getTipoGiorno(dayOfWeek, isFestivo(date)),
+    '',
+    '',
+    '',
+    '',
+    ''
+  ]);
+}
+
+function parseLocalDateForCalendar(dataStr) {
+  if (dataStr instanceof Date) return dataStr;
+  const parts = String(dataStr).split('-').map(Number);
+  return new Date(parts[0], parts[1] - 1, parts[2]);
 }
 
 function getTipoGiorno(dayOfWeek, isHoliday) {
@@ -507,6 +672,18 @@ function getTipoGiorno(dayOfWeek, isHoliday) {
   if (dayOfWeek === 6) return 'SABATO';
   if (dayOfWeek === 0) return 'DOMENICA';
   return 'FERIALE';
+}
+
+function getTipoGiornoByDate(date) {
+  return getTipoGiorno(date.getDay(), isFestivo(date));
+}
+
+function getPuntiByTipoGiorno(tipoGiorno) {
+  const config = getConfigData();
+  if (tipoGiorno === 'FESTIVO') return config.puntiFestivo;
+  if (tipoGiorno === 'DOMENICA') return config.puntiDomenica;
+  if (tipoGiorno === 'SABATO') return config.puntiSabato;
+  return 0;
 }
 
 function getNomeGiorno(dayOfWeek) {
@@ -549,25 +726,75 @@ function calculateEasterDate(year) {
   return new Date(year, month, day);
 }
 
-function Calendario_addToStorico(data) {
+function Calendario_upsertStorico(data) {
   try {
     const sheet = getSheetOrInit('Turni_Storico');
     if (sheet.getLastRow() === 0) {
       sheet.getRange(1, 1, 1, 8).setValues([['ID_Turno', 'Data', 'ID_Tecnico', 'Nome_Tecnico', 'Tipo_Giorno', 'Punti', 'Data_Inserimento', 'Stato']]);
     }
-    sheet.appendRow(['TRN' + Date.now(), data.data, data.idTecnico, data.tecnicoNome, data.tipoGiorno || '', data.punti || 0, new Date(), 'COMPLETATO']);
+
+    const rows = sheet.getDataRange().getValues();
+    for (let i = 1; i < rows.length; i++) {
+      if (formatDate(rows[i][1]) === data.data) {
+        const row = i + 1;
+        sheet.getRange(row, 3, 1, 6).setValues([[
+          data.idTecnico,
+          data.tecnicoNome,
+          data.tipoGiorno || '',
+          data.punti || 0,
+          new Date(),
+          'COMPLETATO'
+        ]]);
+        return;
+      }
+    }
+
+    sheet.appendRow([
+      'TRN' + Date.now(),
+      data.data,
+      data.idTecnico,
+      data.tecnicoNome,
+      data.tipoGiorno || '',
+      data.punti || 0,
+      new Date(),
+      'COMPLETATO'
+    ]);
   } catch (e) {}
+}
+
+function Calendario_removeFromStorico(dataStr) {
+  try {
+    const sheet = getSheetOrInit('Turni_Storico');
+    const rows = sheet.getDataRange().getValues();
+    for (let i = rows.length - 1; i >= 1; i--) {
+      if (formatDate(rows[i][1]) === dataStr) {
+        sheet.deleteRow(i + 1);
+      }
+    }
+  } catch (e) {}
+}
+
+function Calendario_addToStorico(data) {
+  Calendario_upsertStorico(data);
 }
 
 // ============================================================================
 // PREFERENZE.GS
 // ============================================================================
 
+/**
+ * Preferenze.gs - Gestione Preferenze Colori
+ */
+
 const SHEET_PREFERENZE = 'Preferenze_Colori';
 
+/**
+ * Inizializza il foglio Preferenze
+ */
 function initPreferenze() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName(SHEET_PREFERENZE);
+
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_PREFERENZE);
     const headers = ['ID_Tecnico', 'Nome_Tecnico', 'Data', 'Preferenza', 'Mese_Riferimento', 'Data_Inserimento'];
@@ -576,19 +803,27 @@ function initPreferenze() {
     sheet.getRange(1, 1, 1, headers.length).setBackground('#f4b400');
     sheet.getRange(1, 1, 1, headers.length).setFontColor('white');
     sheet.setFrozenRows(1);
+
     const rule = SpreadsheetApp.newDataValidation().requireValueInList(['VERDE', 'BIANCO', 'GIALLO', 'ROSSO'], true).build();
     sheet.getRange('D2:D').setDataValidation(rule);
   }
   return sheet;
 }
 
+/**
+ * Ottieni preferenze (INTERNAL)
+ */
 function Preferenze_getPreferencesInternal() {
   try {
     const sheet = initPreferenze();
     const rows = getDataRows(sheet);
     const preferences = rows.map(r => ({
-      idTecnico: r[0], nomeTecnico: r[1], data: r[2] ? formatDate(r[2]) : '',
-      preferenza: r[3], meseRiferimento: r[4], dataInserimento: r[5] ? formatDate(r[5]) : ''
+      idTecnico: r[0],
+      nomeTecnico: r[1],
+      data: r[2] ? formatDate(r[2]) : '',
+      preferenza: r[3],
+      meseRiferimento: r[4],
+      dataInserimento: r[5] ? formatDate(r[5]) : ''
     }));
     return { success: true, preferences: preferences };
   } catch (error) {
@@ -596,10 +831,18 @@ function Preferenze_getPreferencesInternal() {
   }
 }
 
+/**
+ * Imposta preferenza (INTERNAL)
+ */
 function Preferenze_setPreferenceInternal(data, userId) {
   try {
+    if (!data || data.idTecnico !== userId) {
+      return { success: false, error: 'Puoi modificare solo le tue preferenze' };
+    }
+
     const sheet = initPreferenze();
     const rows = sheet.getDataRange().getValues();
+
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === data.idTecnico && formatDate(rows[i][2]) === data.data) {
         sheet.getRange(i + 1, 4).setValue(data.preferenza);
@@ -607,8 +850,102 @@ function Preferenze_setPreferenceInternal(data, userId) {
         return { success: true, action: 'updated' };
       }
     }
-    sheet.appendRow([data.idTecnico, data.nomeTecnico, data.data, data.preferenza, getMeseRiferimento(data.data), new Date()]);
+
+    sheet.appendRow([
+      data.idTecnico,
+      data.nomeTecnico,
+      data.data,
+      data.preferenza,
+      getMeseRiferimento(data.data),
+      new Date()
+    ]);
     return { success: true, action: 'created' };
+  } catch (error) {
+    return { success: false, error: error.toString() };
+  }
+}
+
+/**
+ * Imposta più preferenze con una sola chiamata API (INTERNAL)
+ */
+function Preferenze_setPreferencesBatchInternal(data, userId) {
+  try {
+    const preferences = data && Array.isArray(data.preferences) ? data.preferences : [];
+    if (preferences.length === 0) {
+      return { success: true, updated: 0, created: 0, message: 'Nessuna preferenza da salvare' };
+    }
+
+    const invalid = preferences.find(p => p.idTecnico !== userId || !p.data || !p.preferenza);
+    if (invalid) {
+      return { success: false, error: 'Payload preferenze non valido o non autorizzato' };
+    }
+
+    const sheet = initPreferenze();
+    const rows = sheet.getDataRange().getValues();
+    const rowByKey = {};
+
+    for (let i = 1; i < rows.length; i++) {
+      const key = rows[i][0] + '|' + formatDate(rows[i][2]);
+      rowByKey[key] = i + 1;
+    }
+
+    let updated = 0;
+    const newRows = [];
+    const now = new Date();
+
+    preferences.forEach(pref => {
+      const key = pref.idTecnico + '|' + pref.data;
+      const row = rowByKey[key];
+
+      if (row) {
+        sheet.getRange(row, 4, 1, 3).setValues([[pref.preferenza, getMeseRiferimento(pref.data), now]]);
+        updated++;
+      } else {
+        newRows.push([
+          pref.idTecnico,
+          pref.nomeTecnico,
+          pref.data,
+          pref.preferenza,
+          getMeseRiferimento(pref.data),
+          now
+        ]);
+      }
+    });
+
+    if (newRows.length > 0) {
+      sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, 6).setValues(newRows);
+    }
+
+    SpreadsheetApp.flush();
+    return { success: true, updated: updated, created: newRows.length };
+  } catch (error) {
+    return { success: false, error: error.toString() };
+  }
+}
+
+/**
+ * Cancella tutte le preferenze di un tecnico (INTERNAL)
+ */
+function Preferenze_clearPreferencesForUserInternal(data, userId) {
+  try {
+    const idTecnico = data && data.idTecnico ? data.idTecnico : userId;
+    if (idTecnico !== userId) {
+      return { success: false, error: 'Puoi cancellare solo le tue preferenze' };
+    }
+
+    const sheet = initPreferenze();
+    const rows = sheet.getDataRange().getValues();
+    let deleted = 0;
+
+    for (let i = rows.length - 1; i >= 1; i--) {
+      if (rows[i][0] === idTecnico) {
+        sheet.deleteRow(i + 1);
+        deleted++;
+      }
+    }
+
+    SpreadsheetApp.flush();
+    return { success: true, deleted: deleted };
   } catch (error) {
     return { success: false, error: error.toString() };
   }
@@ -624,11 +961,19 @@ function getMeseRiferimento(dataString) {
 // LOG.GS
 // ============================================================================
 
+/**
+ * Log.gs - Registro Operazioni
+ */
+
 const SHEET_LOG = 'Log_IA';
 
+/**
+ * Inizializza il foglio Log
+ */
 function initLog() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName(SHEET_LOG);
+
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_LOG);
     const headers = ['Timestamp', 'Azione', 'Data_Turno', 'ID_Tecnico', 'Nome_Tecnico', 'Punteggio', 'Motivo', 'Dettagli'];
@@ -641,14 +986,22 @@ function initLog() {
   return sheet;
 }
 
+/**
+ * Ottieni log (INTERNAL)
+ */
 function Log_getLogInternal() {
   try {
     const sheet = initLog();
     const rows = getDataRows(sheet);
     const log = rows.map(r => ({
-      timestamp: r[0] ? new Date(r[0]).toISOString() : '', azione: r[1],
-      dataTurno: r[2] ? formatDate(r[2]) : '', idTecnico: r[3], nomeTecnico: r[4],
-      punteggio: r[5], motivo: r[6], dettagli: r[7]
+      timestamp: r[0] ? new Date(r[0]).toISOString() : '',
+      azione: r[1],
+      dataTurno: r[2] ? formatDate(r[2]) : '',
+      idTecnico: r[3],
+      nomeTecnico: r[4],
+      punteggio: r[5],
+      motivo: r[6],
+      dettagli: r[7]
     }));
     log.reverse();
     return { success: true, log: log };
@@ -657,10 +1010,35 @@ function Log_getLogInternal() {
   }
 }
 
+/**
+ * Logga azione IA
+ */
 function logIA(azione, dataTurno, idTecnico, nomeTecnico, punteggio, motivo, dettagli) {
   try {
     const sheet = initLog();
-    sheet.appendRow([new Date(), azione, dataTurno, idTecnico, nomeTecnico, punteggio, motivo, dettagli]);
+    sheet.appendRow([
+      new Date(),
+      azione,
+      dataTurno,
+      idTecnico,
+      nomeTecnico,
+      punteggio,
+      motivo,
+      dettagli
+    ]);
+  } catch (e) {}
+}
+
+/**
+ * Logga azione generica
+ */
+function logAction(modulo, azione, targetId, actorId, dettagli) {
+  try {
+    const sheet = getSheetOrInit('Log_Azioni');
+    if (sheet.getLastRow() === 0) {
+      sheet.getRange(1, 1, 1, 6).setValues([['Timestamp', 'Modulo', 'Azione', 'Target_ID', 'Actor_ID', 'Dettagli']]);
+    }
+    sheet.appendRow([new Date(), modulo, azione, targetId, actorId, dettagli]);
   } catch (e) {}
 }
 
@@ -668,29 +1046,49 @@ function logIA(azione, dataTurno, idTecnico, nomeTecnico, punteggio, motivo, det
 // ALGORITMO.GS
 // ============================================================================
 
+/**
+ * Algoritmo.gs - Assegnazione Automatica Turni
+ */
+
 function Algoritmo_calculateTurniAutomaticiInternal(userId) {
   try {
     const config = getConfigData();
     const usersResult = Anagrafica_getUsersInternal();
     const turnsResult = Calendario_getTurnsInternal();
     const prefResult = Preferenze_getPreferencesInternal();
+
     if (!usersResult.success || !turnsResult.success) {
       return { success: false, error: 'Errore nel recupero dati' };
     }
+
     const users = usersResult.users.filter(u => isUserActiveForSmartAssignment(u));
     const allTurns = turnsResult.turns || [];
-    const turns = allTurns.filter(t =>
-      !t.idTecnico && (t.tipoGiorno === 'SABATO' || t.tipoGiorno === 'DOMENICA' || t.tipoGiorno === 'FESTIVO')
-    );
+    const turns = allTurns
+      .filter(t => !t.idTecnico && (t.tipoGiorno === 'SABATO' || t.tipoGiorno === 'DOMENICA' || t.tipoGiorno === 'FESTIVO'))
+      .sort((a, b) => String(a.data).localeCompare(String(b.data)));
+
     let assegnazioni = 0;
     let anomalie = [];
+
     for (const turno of turns) {
+      if (Calendario_isFrozenDate(turno.data)) {
+        anomalie.push({ data: turno.data, motivo: 'Turno congelato dal Giorno_Freeze' });
+        continue;
+      }
+
       const result = assegnaTurno(turno, users, prefResult.preferences || [], config, allTurns);
+
       if (result.success) {
         Calendario_addTurnInternal({
-          data: turno.data, idTecnico: result.idTecnico, tecnicoNome: result.tecnicoNome,
-          tipoGiorno: turno.tipoGiorno, punti: result.punti, note: 'Assegnazione automatica'
+          data: turno.data,
+          idTecnico: result.idTecnico,
+          tecnicoNome: result.tecnicoNome,
+          tipoGiorno: turno.tipoGiorno,
+          punti: result.punti,
+          note: 'Assegnazione automatica',
+          skipPointsUpdate: true
         }, userId);
+
         const user = users.find(u => u.id === result.idTecnico);
         if (user) {
           user.punti = (parseFloat(user.punti) || 0) + result.punti;
@@ -702,15 +1100,14 @@ function Algoritmo_calculateTurniAutomaticiInternal(userId) {
           statoTurno: 'ASSEGNATO',
           puntiAssegnati: result.punti
         });
+
         assegnazioni++;
-        logIA('AUTO_ASSIGN', turno.data, result.idTecnico, result.tecnicoNome,
-          result.punteggioVirtuale, 'Assegnazione automatica - ' + turno.tipoGiorno,
-          'Punti reali: ' + result.puntiReali);
       } else {
         anomalie.push({ data: turno.data, motivo: result.motivo });
-        logIA('ANOMALY', turno.data, '', '', 0, 'Nessun tecnico disponibile', result.motivo);
       }
     }
+
+    Algoritmo_updatePointsInternal(userId);
     return { success: true, assegnazioni: assegnazioni, anomalie: anomalie };
   } catch (error) {
     return { success: false, error: error.toString() };
@@ -720,21 +1117,33 @@ function Algoritmo_calculateTurniAutomaticiInternal(userId) {
 function Algoritmo_updatePointsInternal(userId) {
   try {
     const usersSheet = getSheetOrInit('Anagrafica');
-    const storicoSheet = getSheetOrInit('Turni_Storico');
+    const turnsResult = Calendario_getTurnsInternal();
+    const turns = turnsResult.success ? turnsResult.turns : [];
     const users = getDataRows(usersSheet);
-    const storico = getDataRows(storicoSheet);
+
     const puntiPerUtente = {};
-    for (const row of storico) {
-      const idTecnico = row[2];
-      const punti = parseFloat(row[5]) || 0;
+    const ultimoTurnoPerUtente = {};
+
+    for (const turn of turns) {
+      if (turn.statoTurno !== 'ASSEGNATO' || !turn.idTecnico) continue;
+      const idTecnico = turn.idTecnico;
+      const punti = parseFloat(turn.puntiAssegnati) || 0;
+      const dataTurno = turn.data || '';
+
       puntiPerUtente[idTecnico] = (puntiPerUtente[idTecnico] || 0) + punti;
+      if (dataTurno && (!ultimoTurnoPerUtente[idTecnico] || dataTurno > ultimoTurnoPerUtente[idTecnico])) {
+        ultimoTurnoPerUtente[idTecnico] = dataTurno;
+      }
     }
+
     for (let i = 0; i < users.length; i++) {
       const id = users[i][0];
-      const puntiTotali = puntiPerUtente[id] || 0;
-      usersSheet.getRange(i + 2, 6).setValue(puntiTotali);
+      const row = i + 2;
+      usersSheet.getRange(row, 6).setValue(puntiPerUtente[id] || 0);
+      usersSheet.getRange(row, 7).setValue(ultimoTurnoPerUtente[id] || '');
     }
-    logAction('ALGORITMO', 'UPDATE_POINTS', '', userId, 'Punti aggiornati per tutti gli utenti');
+
+    logAction('ALGORITMO', 'UPDATE_POINTS', '', userId, 'Punti riallineati dal foglio Calendario');
     return { success: true, message: 'Punti aggiornati' };
   } catch (error) {
     return { success: false, error: error.toString() };
@@ -759,48 +1168,66 @@ function getPreferencePriority(preferenza) {
 }
 
 function assegnaTurno(turno, users, preferences, config, allTurns) {
-  const turnoDate = new Date(turno.data);
+  const turnoDate = parseLocalDateForCalendar(turno.data);
+
   let candidati = users.filter(u => {
     if (!isUserActiveForSmartAssignment(u)) return false;
     const turnsForUser = (allTurns || []).filter(t => t.idTecnico === u.id && t.statoTurno === 'ASSEGNATO' && t.data);
     for (const assignedTurn of turnsForUser) {
-      const giorniDallTurno = daysBetween(new Date(assignedTurn.data), turnoDate);
-      if (giorniDallTurno < config.pausaMinima) return false;
+      const distanza = Math.abs(signedDaysBetween(parseLocalDateForCalendar(assignedTurn.data), turnoDate));
+      if (distanza < config.pausaMinima) return false;
     }
     return true;
   });
+
   if (candidati.length === 0) {
-    return { success: false, motivo: 'Nessun tecnico disponibile (tutti OFF o in pausa)' };
+    return { success: false, motivo: 'Nessun tecnico disponibile: tutti OFF o in pausa minima' };
   }
+
   const preferenza = getPreferenzaPerData(candidati, turno.data, preferences);
   candidati = candidati.filter(u => preferenza[u.id] !== 'ROSSO');
+
   if (candidati.length === 0) {
-    return { success: false, motivo: 'Tutti i tecnici hanno preferito ROSSO' };
+    return { success: false, motivo: 'Tutti i tecnici disponibili hanno preferenza ROSSO' };
   }
+
   const punteggiVirtuali = candidati.map(u => {
     const pref = preferenza[u.id] || 'BIANCO';
     const puntiReali = getSmartRealPointsForTurn(u.id, turnoDate, allTurns);
     let bonusMalus = 0;
     if (pref === 'VERDE') bonusMalus = -2;
     else if (pref === 'GIALLO') bonusMalus = 2;
-    return { user: u, puntiReali: puntiReali, puntiVirtuali: puntiReali + bonusMalus, preferenza: pref };
+
+    return {
+      user: u,
+      puntiReali: puntiReali,
+      puntiVirtuali: puntiReali + bonusMalus,
+      preferenza: pref
+    };
   });
+
   punteggiVirtuali.sort((a, b) => {
     if (a.puntiVirtuali !== b.puntiVirtuali) return a.puntiVirtuali - b.puntiVirtuali;
+
     const prefDelta = getPreferencePriority(a.preferenza) - getPreferencePriority(b.preferenza);
     if (prefDelta !== 0) return prefDelta;
+
     const aLast = a.user.ultimoTurno || '0000-00-00';
     const bLast = b.user.ultimoTurno || '0000-00-00';
     return aLast.localeCompare(bLast);
   });
+
   const vincitore = punteggiVirtuali[0];
-  let punti = 0;
-  if (turno.tipoGiorno === 'FESTIVO') punti = config.puntiFestivo;
-  else if (turno.tipoGiorno === 'DOMENICA') punti = config.puntiDomenica;
-  else if (turno.tipoGiorno === 'SABATO') punti = config.puntiSabato;
+  const punti = getPuntiByTipoGiorno(turno.tipoGiorno);
+
   return {
-    success: true, idTecnico: vincitore.user.id, tecnicoNome: vincitore.user.nome + ' ' + vincitore.user.cognome,
-    punti: punti, puntiReali: vincitore.puntiReali, punteggioVirtuale: vincitore.puntiVirtuali, preferenza: vincitore.preferenza
+    success: true,
+    idTecnico: vincitore.user.id,
+    tecnicoNome: vincitore.user.nome + ' ' + vincitore.user.cognome,
+    punti: punti,
+    puntiReali: vincitore.puntiReali,
+    punteggioVirtuale: vincitore.puntiVirtuali,
+    preferenza: vincitore.preferenza
   };
 }
 
@@ -811,8 +1238,10 @@ function getSmartRealPointsForTurn(idTecnico, turnoDate, allTurns) {
     if (assignedTurn.idTecnico !== idTecnico || assignedTurn.statoTurno !== 'ASSEGNATO' || !assignedTurn.data) {
       return totale;
     }
-    const assignedDate = new Date(assignedTurn.data);
+
+    const assignedDate = parseLocalDateForCalendar(assignedTurn.data);
     if (assignedDate >= monthStart) return totale;
+
     return totale + (parseFloat(assignedTurn.puntiAssegnati) || 0);
   }, 0);
 }
@@ -831,30 +1260,45 @@ function getPreferenzaPerData(users, data, preferences) {
   return result;
 }
 
+function signedDaysBetween(date1, date2) {
+  const oneDay = 24 * 60 * 60 * 1000;
+  return Math.round((date2 - date1) / oneDay);
+}
+
+function daysBetween(date1, date2) {
+  return Math.abs(signedDaysBetween(date1, date2));
+}
+
 function getConfigData() {
+  if (typeof Config_getConfigInternal === 'function') {
+    const result = Config_getConfigInternal(null);
+    if (result && result.success && result.config) return result.config;
+  }
+  return {
+    pausaMinima: 30,
+    puntiSabato: 1,
+    puntiDomenica: 2,
+    puntiFestivo: 3,
+    giornoFreeze: 25,
+    mesiFuturiMax: 2,
+    calendarioStart: '2026-01-01',
+    managerEmail: 'manager@azienda.com',
+    ultimoCalcolo: ''
+  };
+}
+
+/**
+ * Configurazione.gs - criteri di scelta e finestra calendario.
+ */
+
+function Config_getConfigInternal(userId) {
   try {
-    const sheet = getSheetOrInit('Configurazione');
-    const defaults = [
-      ['Pausa_Minima_Giorni', 30, 'Giorni minimi tra due turni dello stesso tecnico'],
-      ['Punti_Sabato', 1, 'Punti assegnati per sabato'],
-      ['Punti_Domenica', 2, 'Punti assegnati per domenica'],
-      ['Punti_Festivo', 3, 'Punti assegnati per festivo'],
-      ['Giorno_Freeze', 25, 'Giorno del mese per congelare i turni del mese successivo'],
-      ['Mesi_Futuri_Max', 2, 'Mesi futuri generati nel calendario'],
-      ['Calendario_Start', '2026-01-01', 'Prima data da generare/leggere nel calendario'],
-      ['Manager_Email', 'manager@azienda.com', 'Email manager iniziale'],
-      ['Ultimo_Calcolo', '', 'Data ultimo calcolo automatico']
-    ];
-    const rows = sheet.getDataRange().getValues();
-    const existing = {};
-    for (let i = 1; i < rows.length; i++) existing[String(rows[i][0])] = i + 1;
-    defaults.forEach(row => {
-      if (!existing[row[0]]) sheet.appendRow(row);
-    });
-    const refreshedRows = sheet.getDataRange().getValues();
+    const sheet = Config_initSheet();
+    const rows = getDataRows(sheet);
     const map = {};
-    for (let i = 1; i < refreshedRows.length; i++) map[String(refreshedRows[i][0])] = refreshedRows[i][1];
-    return {
+    rows.forEach(r => map[String(r[0])] = r[1]);
+
+    const config = {
       pausaMinima: parseInt(map.Pausa_Minima_Giorni, 10) || 30,
       puntiSabato: parseFloat(map.Punti_Sabato) || 1,
       puntiDomenica: parseFloat(map.Punti_Domenica) || 2,
@@ -865,19 +1309,19 @@ function getConfigData() {
       managerEmail: String(map.Manager_Email || 'manager@azienda.com'),
       ultimoCalcolo: map.Ultimo_Calcolo ? String(map.Ultimo_Calcolo) : ''
     };
-  } catch (e) {
-    return { pausaMinima: 30, puntiSabato: 1, puntiDomenica: 2, puntiFestivo: 3, giornoFreeze: 25, mesiFuturiMax: 2, calendarioStart: '2026-01-01', managerEmail: 'manager@azienda.com', ultimoCalcolo: '' };
-  }
-}
 
-function Config_getConfigInternal(userId) {
-  return { success: true, config: getConfigData() };
+    return { success: true, config: config };
+  } catch (error) {
+    return { success: false, error: error.toString() };
+  }
 }
 
 function Config_updateConfigInternal(data, userId) {
   try {
-    const sheet = getSheetOrInit('Configurazione');
-    getConfigData();
+    if (userId && !Config_isManagerUser(userId)) {
+      return { success: false, error: 'Solo un manager può modificare i criteri' };
+    }
+
     const allowed = {
       pausaMinima: 'Pausa_Minima_Giorni',
       puntiSabato: 'Punti_Sabato',
@@ -888,23 +1332,68 @@ function Config_updateConfigInternal(data, userId) {
       calendarioStart: 'Calendario_Start',
       managerEmail: 'Manager_Email'
     };
+
+    const sheet = Config_initSheet();
     const rows = sheet.getDataRange().getValues();
     const rowByKey = {};
     for (let i = 1; i < rows.length; i++) rowByKey[String(rows[i][0])] = i + 1;
+
     Object.keys(allowed).forEach(frontKey => {
       if (data[frontKey] === undefined) return;
-      const row = rowByKey[allowed[frontKey]];
+      const sheetKey = allowed[frontKey];
+      const row = rowByKey[sheetKey];
       if (row) sheet.getRange(row, 2).setValue(data[frontKey]);
     });
-    return { success: true, config: getConfigData() };
+
+    logAction('CONFIG', 'UPDATE_CONFIG', '', userId, 'Criteri manager aggiornati');
+    return Config_getConfigInternal(userId);
   } catch (error) {
     return { success: false, error: error.toString() };
   }
 }
 
-function daysBetween(date1, date2) {
-  const oneDay = 24 * 60 * 60 * 1000;
-  return Math.round(Math.abs((date2 - date1) / oneDay));
+function Config_initSheet() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName('Configurazione');
+
+  if (!sheet) {
+    sheet = ss.insertSheet('Configurazione');
+    sheet.getRange(1, 1, 1, 3).setValues([['Parametro', 'Valore', 'Descrizione']]);
+    sheet.getRange(1, 1, 1, 3).setFontWeight('bold').setBackground('#9c27b0').setFontColor('white');
+  }
+
+  const defaults = [
+    ['Pausa_Minima_Giorni', 30, 'Giorni minimi tra due turni dello stesso tecnico'],
+    ['Punti_Sabato', 1, 'Punti assegnati per sabato'],
+    ['Punti_Domenica', 2, 'Punti assegnati per domenica'],
+    ['Punti_Festivo', 3, 'Punti assegnati per festivo'],
+    ['Giorno_Freeze', 25, 'Giorno del mese per congelare le modifiche ai turni del mese successivo'],
+    ['Mesi_Futuri_Max', 2, 'Mesi futuri generati nel calendario'],
+    ['Calendario_Start', '2026-01-01', 'Prima data da generare/leggere nel calendario'],
+    ['Manager_Email', 'manager@azienda.com', 'Email manager iniziale'],
+    ['Ultimo_Calcolo', '', 'Data ultimo calcolo automatico']
+  ];
+
+  const rows = sheet.getDataRange().getValues();
+  const existing = {};
+  for (let i = 1; i < rows.length; i++) existing[String(rows[i][0])] = i + 1;
+
+  defaults.forEach(row => {
+    if (!existing[row[0]]) sheet.appendRow(row);
+  });
+
+  return sheet;
+}
+
+function Config_isManagerUser(userId) {
+  try {
+    const sheet = getSheetOrInit('Auth');
+    const rows = sheet.getDataRange().getValues();
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i][0] === userId && rows[i][3] === 'MANAGER') return true;
+    }
+  } catch (e) {}
+  return false;
 }
 
 // ============================================================================
