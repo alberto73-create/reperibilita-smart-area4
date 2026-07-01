@@ -177,8 +177,15 @@ function getHolidays() {
         const date = new Date(year, holiday.month, holiday.day);
         holidays.push({ data: formatDate(date), nome: holiday.nome, tipo: 'Fissa', anno: year });
       });
+
+      const pasqua = calculateEasterDate(year);
+      const pasquetta = new Date(pasqua);
+      pasquetta.setDate(pasquetta.getDate() + 1);
+      holidays.push({ data: formatDate(pasqua), nome: 'Pasqua', tipo: 'Mobile', anno: year });
+      holidays.push({ data: formatDate(pasquetta), nome: 'Pasquetta', tipo: 'Mobile', anno: year });
     }
 
+    holidays.sort((a, b) => a.data.localeCompare(b.data));
     return { success: true, holidays: holidays };
   } catch (error) {
     return { success: false, error: error.toString() };
