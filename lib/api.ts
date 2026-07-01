@@ -2,7 +2,7 @@ const API_BASE = '/api';
 const DEFAULT_API_TIMEOUT_MS = 25000;
 const LONG_API_TIMEOUT_MS = 55000;
 
-import type { User, Turn, Preference, Holiday, LogEntry, Stats, Config } from '../src/types';
+import type { User, Turn, Preference, Holiday, LogEntry, Stats, Config, DbHealth } from '../src/types';
 
 type PreferenceColor = 'VERDE' | 'BIANCO' | 'GIALLO' | 'ROSSO';
 type ApiCallOptions = { forcePost?: boolean; timeoutMs?: number };
@@ -207,6 +207,11 @@ export async function getLog(): Promise<LogEntry[]> {
 export async function getStats(): Promise<Stats> {
   const result = await callAPI('getStats');
   return result.stats || {};
+}
+
+export async function getHealth(): Promise<DbHealth> {
+  const result = await callAPI('getHealth');
+  return result.health;
 }
 
 // ==================== CONFIGURAZIONE ====================
