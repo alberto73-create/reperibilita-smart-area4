@@ -32,4 +32,11 @@ export default tseslint.config(
       globals: globals.serviceworker,
     },
   },
+  {
+    files: ['scripts/**/*.mjs', 'tests/**/*.mjs'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      globals: globals.node,
+    },
+  },
 );
