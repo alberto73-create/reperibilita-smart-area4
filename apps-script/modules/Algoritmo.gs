@@ -4,6 +4,9 @@
 
 function Algoritmo_calculateTurniAutomaticiInternal(userId) {
   try {
+    if (!Anagrafica_isManagerUser(userId)) {
+      return { success: false, error: 'Solo un manager può calcolare i turni' };
+    }
     const config = getConfigData();
     const usersResult = Anagrafica_getUsersInternal();
     const turnsResult = Calendario_getTurnsInternal();
@@ -31,7 +34,7 @@ function Algoritmo_calculateTurniAutomaticiInternal(userId) {
       const result = assegnaTurno(turno, users, prefResult.preferences || [], config, allTurns);
 
       if (result.success) {
-        Calendario_addTurnInternal({
+        const saveResult = Calendario_addTurnInternal({
           data: turno.data,
           idTecnico: result.idTecnico,
           tecnicoNome: result.tecnicoNome,
@@ -40,6 +43,11 @@ function Algoritmo_calculateTurniAutomaticiInternal(userId) {
           note: 'Assegnazione automatica',
           skipPointsUpdate: true
         }, userId);
+
+        if (!saveResult.success) {
+          anomalie.push({ data: turno.data, motivo: saveResult.error || 'Salvataggio turno non riuscito' });
+          continue;
+        }
 
         const user = users.find(u => u.id === result.idTecnico);
         if (user) {
@@ -68,6 +76,9 @@ function Algoritmo_calculateTurniAutomaticiInternal(userId) {
 
 function Algoritmo_updatePointsInternal(userId) {
   try {
+    if (!Anagrafica_isManagerUser(userId)) {
+      return { success: false, error: 'Solo un manager può riallineare i punteggi' };
+    }
     const usersSheet = getSheetOrInit('Anagrafica');
     const turnsResult = Calendario_getTurnsInternal();
     const turns = turnsResult.success ? turnsResult.turns : [];
@@ -192,7 +203,7 @@ function getSmartRealPointsForTurn(idTecnico, turnoDate, allTurns) {
     }
 
     const assignedDate = parseLocalDateForCalendar(assignedTurn.data);
-    if (assignedDate >= monthStart) return totale;
+    if (assignedDate < monthStart || assignedDate >= turnoDate) return totale;
 
     return totale + (parseFloat(assignedTurn.puntiAssegnati) || 0);
   }, 0);

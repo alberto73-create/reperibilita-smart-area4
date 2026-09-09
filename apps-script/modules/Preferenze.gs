@@ -55,6 +55,8 @@ function Preferenze_setPreferenceInternal(data, userId) {
     if (!data || data.idTecnico !== userId) {
       return { success: false, error: 'Puoi modificare solo le tue preferenze' };
     }
+    const validation = Preferenze_validateInput(data, userId);
+    if (!validation.success) return validation;
 
     const sheet = initPreferenze();
     const rows = sheet.getDataRange().getValues();
@@ -91,7 +93,7 @@ function Preferenze_setPreferencesBatchInternal(data, userId) {
       return { success: true, updated: 0, created: 0, message: 'Nessuna preferenza da salvare' };
     }
 
-    const invalid = preferences.find(p => p.idTecnico !== userId || !p.data || !p.preferenza);
+    const invalid = preferences.find(p => p.idTecnico !== userId || !Preferenze_validateInput(p, userId).success);
     if (invalid) {
       return { success: false, error: 'Payload preferenze non valido o non autorizzato' };
     }
@@ -168,7 +170,31 @@ function Preferenze_clearPreferencesForUserInternal(data, userId) {
 }
 
 function getMeseRiferimento(dataString) {
-  const d = new Date(dataString);
+  const d = parseLocalDateForCalendar(dataString);
   const mesi = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
   return mesi[d.getMonth()] + ' ' + d.getFullYear();
+}
+
+function Preferenze_validateInput(data, userId) {
+  const colori = ['VERDE', 'BIANCO', 'GIALLO', 'ROSSO'];
+  if (!data || data.idTecnico !== userId || !/^\d{4}-\d{2}-\d{2}$/.test(String(data.data)) || colori.indexOf(data.preferenza) === -1) {
+    return { success: false, error: 'Preferenza, utente o data non validi' };
+  }
+
+  const date = parseLocalDateForCalendar(data.data);
+  if (isNaN(date.getTime()) || formatDate(date) !== data.data || (date.getDay() !== 0 && date.getDay() !== 6 && !isFestivo(date))) {
+    return { success: false, error: 'Le preferenze sono ammesse solo per sabati, domeniche e festivi' };
+  }
+
+  if (Anagrafica_isManagerUser(userId)) return { success: true };
+  const config = getConfigData();
+  const today = new Date();
+  const monthDistance = (date.getFullYear() - today.getFullYear()) * 12 + date.getMonth() - today.getMonth();
+  if (monthDistance < 1 || monthDistance > config.mesiFuturiMax) {
+    return { success: false, error: 'Data fuori dalla finestra configurata per le preferenze' };
+  }
+  if (monthDistance === 1 && today.getDate() > config.giornoFreeze) {
+    return { success: false, error: 'Preferenze congelate per il mese selezionato' };
+  }
+  return { success: true };
 }
