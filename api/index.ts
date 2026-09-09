@@ -4,7 +4,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 function setCors(res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   res.setHeader('Cache-Control', 'no-store');
 }
 
@@ -35,6 +35,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       } else if (value !== undefined && value !== null) {
         params.set(key, String(value));
       }
+    }
+
+    const authorization = req.headers.authorization;
+    if (authorization?.startsWith('Bearer ')) {
+      params.set('token', authorization.slice('Bearer '.length));
     }
 
     const separator = appsScriptUrl.includes('?') ? '&' : '?';

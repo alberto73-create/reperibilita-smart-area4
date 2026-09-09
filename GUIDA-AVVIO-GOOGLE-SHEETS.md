@@ -177,7 +177,10 @@ vercel --prod
 Puoi provare l'endpoint Apps Script direttamente nel browser:
 
 ```text
-https://script.google.com/macros/s/XXXXXXXXXXXXXXXXXXXXXXXX/exec?action=login&email=manager@azienda.com&pin=0000
+curl -X POST \
+  'https://script.google.com/macros/s/XXXXXXXXXXXXXXXXXXXXXXXX/exec?action=login' \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"manager@azienda.com","pin":"0000"}'
 ```
 
 Se funziona, riceverai un JSON simile a:

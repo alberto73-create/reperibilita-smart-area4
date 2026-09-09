@@ -1,6 +1,6 @@
 /**
  * Helpers.gs - Funzioni Utility Comuni
- * 
+ *
  * QUESTO FILE DEVE ESSERE CARICATO PER PRIMO
  * Le funzioni qui definite sono usate da tutti gli altri moduli
  */

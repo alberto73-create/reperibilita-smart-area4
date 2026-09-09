@@ -1,19 +1,23 @@
 /**
  * REPERIBILITÀ SMART - AREA 4
- * Codice completo per Google Apps Script
- * 
- * Generato automaticamente - NON MODIFICARE QUESTO FILE
- * Modifica i file in /modules e rigenera
+ * Codice completo per Google Apps Script.
+ * Generato automaticamente: modifica i file modulari e usa npm run build:apps-script.
  */
 
 // ============================================================================
-// HELPERS.GS
+// APPS-SCRIPT/MODULES/HELPERS.GS
 // ============================================================================
 
 /**
  * Helpers.gs - Funzioni Utility Comuni
+ *
+ * QUESTO FILE DEVE ESSERE CARICATO PER PRIMO
+ * Le funzioni qui definite sono usate da tutti gli altri moduli
  */
 
+/**
+ * Ottieni sheet (lancia errore se non esiste)
+ */
 function getSheet(name) {
   if (!name) {
     throw new Error('Non eseguire getSheet dal menu. È una funzione interna: seleziona ed esegui STEP2_inizializzaApi oppure initTutto.');
@@ -27,6 +31,9 @@ function getSheet(name) {
   return sheet;
 }
 
+/**
+ * Ottieni o crea sheet
+ */
 function getSheetOrInit(name) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName(name);
@@ -36,11 +43,17 @@ function getSheetOrInit(name) {
   return sheet;
 }
 
+/**
+ * Ottieni righe dati (salta header)
+ */
 function getDataRows(sheet) {
   const rows = sheet.getDataRange().getValues();
   return rows.slice(1);
 }
 
+/**
+ * Formatta data come YYYY-MM-DD
+ */
 function formatDate(date) {
   if (!date) return '';
   const d = new Date(date);
@@ -50,12 +63,9 @@ function formatDate(date) {
   return year + '-' + month + '-' + day;
 }
 
-function parseDateString(value) {
-  if (value instanceof Date) return value;
-  const parts = String(value).split('-').map(Number);
-  return new Date(parts[0], parts[1] - 1, parts[2]);
-}
-
+/**
+ * Crea risposta JSON
+ */
 function jsonResponse(data) {
   return ContentService
     .createTextOutput(JSON.stringify(data))
@@ -63,23 +73,36 @@ function jsonResponse(data) {
 }
 
 // ============================================================================
-// AUTH.GS
+// APPS-SCRIPT/MODULES/AUTH.GS
 // ============================================================================
+
+/**
+ * Auth.gs - Sistema di Autenticazione
+ * Gestisce login, PIN e ruoli (USER/MANAGER)
+ */
 
 const SHEET_AUTH = 'Auth';
 
+/**
+ * Inizializza il foglio Auth con utenti e PIN
+ */
 function initAuth() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName(SHEET_AUTH);
 
   if (!sheet) {
     sheet = ss.insertSheet(SHEET_AUTH);
-    sheet.getRange(1, 1, 1, 5).setValues([['ID', 'Email', 'PIN', 'Ruolo', 'Nome']]);
+
+    // Header
+    sheet.getRange(1, 1, 1, 5).setValues([[
+      'ID', 'Email', 'PIN', 'Ruolo', 'Nome'
+    ]]);
     sheet.getRange(1, 1, 1, 5).setFontWeight('bold');
     sheet.getRange(1, 1, 1, 5).setBackground('#4285f4');
     sheet.getRange(1, 1, 1, 5).setFontColor('white');
     sheet.setFrozenRows(1);
 
+    // Utenti di default (PIN: 1234 per user, 0000 per manager)
     const defaultUsers = [
       ['USR001', 'mario.rossi@azienda.com', '1234', 'USER', 'Mario Rossi'],
       ['USR002', 'luca.bianchi@azienda.com', '1234', 'USER', 'Luca Bianchi'],
@@ -87,26 +110,35 @@ function initAuth() {
       ['USR004', 'giulia.neri@azienda.com', '1234', 'USER', 'Giulia Neri'],
       ['MGR001', 'manager@azienda.com', '0000', 'MANAGER', 'Manager'],
     ];
+
     if (defaultUsers.length > 0) {
       sheet.getRange(2, 1, defaultUsers.length, 5).setValues(defaultUsers);
     }
-    sheet.setColumnWidth(1, 80);
-    sheet.setColumnWidth(2, 200);
-    sheet.setColumnWidth(3, 80);
-    sheet.setColumnWidth(4, 100);
-    sheet.setColumnWidth(5, 150);
+
+    // Formatta colonne
+    sheet.setColumnWidth(1, 80);   // ID
+    sheet.setColumnWidth(2, 200);  // Email
+    sheet.setColumnWidth(3, 80);   // PIN
+    sheet.setColumnWidth(4, 100);  // Ruolo
+    sheet.setColumnWidth(5, 150);  // Nome
   }
+
   return sheet;
 }
 
+/**
+ * Verifica login con email e PIN (INTERNAL)
+ */
 function Auth_loginInternal(email, pin) {
   try {
     const sheet = getSheetOrInit(SHEET_AUTH);
     const rows = sheet.getDataRange().getValues();
+
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
       const rowEmail = String(row[1]).toLowerCase().trim();
       const rowPin = String(row[2]).trim();
+
       if (rowEmail === email.toLowerCase().trim() && rowPin === pin) {
         return {
           success: true,
@@ -120,104 +152,200 @@ function Auth_loginInternal(email, pin) {
         };
       }
     }
-    return { success: false, error: 'Email o PIN non validi' };
+
+    return {
+      success: false,
+      error: 'Email o PIN non validi'
+    };
   } catch (error) {
-    return { success: false, error: 'Errore nel login: ' + error.toString() };
+    return {
+      success: false,
+      error: 'Errore nel login: ' + error.toString()
+    };
   }
 }
 
+/**
+ * Cambia il PIN di un utente (INTERNAL)
+ */
 function Auth_changePinInternal(userId, newPin, requestedBy) {
   try {
+    // Verifica che chi richiede sia manager
     const sheet = getSheetOrInit(SHEET_AUTH);
     const rows = sheet.getDataRange().getValues();
     let isManager = false;
+
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === requestedBy && rows[i][3] === 'MANAGER') {
         isManager = true;
         break;
       }
     }
+
     if (!isManager) {
-      return { success: false, error: 'Solo un manager può cambiare i PIN' };
+      return {
+        success: false,
+        error: 'Solo un manager può cambiare i PIN'
+      };
     }
+
+    // Verifica formato PIN (4 cifre)
     if (!/^\d{4}$/.test(newPin)) {
-      return { success: false, error: 'Il PIN deve essere composto da 4 cifre' };
+      return {
+        success: false,
+        error: 'Il PIN deve essere composto da 4 cifre'
+      };
     }
+
+    // Trova e aggiorna utente
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === userId) {
         const row = i + 1;
         sheet.getRange(row, 3).setValue(newPin);
+
         logAuth('CHANGE_PIN', userId, requestedBy, 'PIN modificato');
-        return { success: true, message: 'PIN aggiornato con successo' };
+
+        return {
+          success: true,
+          message: 'PIN aggiornato con successo'
+        };
       }
     }
-    return { success: false, error: 'Utente non trovato' };
+
+    return {
+      success: false,
+      error: 'Utente non trovato'
+    };
   } catch (error) {
-    return { success: false, error: 'Errore: ' + error.toString() };
+    return {
+      success: false,
+      error: 'Errore: ' + error.toString()
+    };
   }
 }
 
+/**
+ * Resetta il PIN di un utente (INTERNAL)
+ */
 function Auth_resetPinInternal(userId, requestedBy) {
   try {
     const sheet = getSheetOrInit(SHEET_AUTH);
     const rows = sheet.getDataRange().getValues();
     let isManager = false;
     let userRole = '';
+
     for (let i = 1; i < rows.length; i++) {
-      if (rows[i][0] === requestedBy && rows[i][3] === 'MANAGER') isManager = true;
-      if (rows[i][0] === userId) userRole = rows[i][3];
+      if (rows[i][0] === requestedBy && rows[i][3] === 'MANAGER') {
+        isManager = true;
+      }
+      if (rows[i][0] === userId) {
+        userRole = rows[i][3];
+      }
     }
+
     if (!isManager) {
-      return { success: false, error: 'Solo un manager può resettare i PIN' };
+      return {
+        success: false,
+        error: 'Solo un manager può resettare i PIN'
+      };
     }
+
+    // PIN default in base al ruolo
     const defaultPin = userRole === 'MANAGER' ? '0000' : '1234';
+
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === userId) {
         const row = i + 1;
         sheet.getRange(row, 3).setValue(defaultPin);
+
         logAuth('RESET_PIN', userId, requestedBy, 'PIN resettato a ' + defaultPin);
-        return { success: true, message: 'PIN resettato a ' + defaultPin, newPin: defaultPin };
+
+        return {
+          success: true,
+          message: 'PIN resettato a ' + defaultPin,
+          newPin: defaultPin
+        };
       }
     }
-    return { success: false, error: 'Utente non trovato' };
+
+    return {
+      success: false,
+      error: 'Utente non trovato'
+    };
   } catch (error) {
-    return { success: false, error: 'Errore: ' + error.toString() };
+    return {
+      success: false,
+      error: 'Errore: ' + error.toString()
+    };
   }
 }
 
+/**
+ * Ottieni lista utenti (INTERNAL)
+ */
 function Auth_getUserListInternal(requestedBy) {
   try {
     const sheet = getSheetOrInit(SHEET_AUTH);
     const rows = sheet.getDataRange().getValues();
     let isManager = false;
+
     for (let i = 1; i < rows.length; i++) {
       if (rows[i][0] === requestedBy && rows[i][3] === 'MANAGER') {
         isManager = true;
         break;
       }
     }
+
     if (!isManager) {
-      return { success: false, error: 'Accesso riservato ai manager' };
+      return {
+        success: false,
+        error: 'Accesso riservato ai manager'
+      };
     }
+
     const users = [];
     for (let i = 1; i < rows.length; i++) {
-      users.push({ id: rows[i][0], email: rows[i][1], ruolo: rows[i][3], nome: rows[i][4], pinMasked: '****' });
+      users.push({
+        id: rows[i][0],
+        email: rows[i][1],
+        ruolo: rows[i][3],
+        nome: rows[i][4],
+        pinMasked: '****'
+      });
     }
-    return { success: true, users: users };
+
+    return {
+      success: true,
+      users: users
+    };
   } catch (error) {
-    return { success: false, error: 'Errore: ' + error.toString() };
+    return {
+      success: false,
+      error: 'Errore: ' + error.toString()
+    };
   }
 }
 
+/**
+ * Logga le operazioni di auth
+ */
 function logAuth(azione, targetUserId, actorUserId, dettagli) {
   try {
     const sheet = getSheetOrInit(SHEET_AUTH + '_Log');
-    sheet.appendRow([new Date(), azione, targetUserId, actorUserId, dettagli]);
-  } catch (e) {}
+    sheet.appendRow([
+      new Date(),
+      azione,
+      targetUserId,
+      actorUserId,
+      dettagli
+    ]);
+  } catch (e) {
+    // Ignora errori di log
+  }
 }
 
 // ============================================================================
-// ANAGRAFICA.GS
+// APPS-SCRIPT/MODULES/ANAGRAFICA.GS
 // ============================================================================
 
 /**
@@ -436,7 +564,7 @@ function addToAuth(userId, email, nome) {
 }
 
 // ============================================================================
-// CALENDARIO.GS
+// APPS-SCRIPT/MODULES/CALENDARIO.GS
 // ============================================================================
 
 /**
@@ -633,6 +761,23 @@ function ensureCalendarioWindow(sheet) {
   if (newRows.length > 0) {
     sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, 8).setValues(newRows);
   }
+
+  sheet.appendRow([
+    date,
+    getNomeGiorno(dayOfWeek),
+    getTipoGiorno(dayOfWeek, isFestivo(date)),
+    '',
+    '',
+    '',
+    '',
+    ''
+  ]);
+}
+
+function parseLocalDateForCalendar(dataStr) {
+  if (dataStr instanceof Date) return dataStr;
+  const parts = String(dataStr).split('-').map(Number);
+  return new Date(parts[0], parts[1] - 1, parts[2]);
 }
 
 function ensureCalendarDateExists(sheet, dataStr) {
@@ -779,7 +924,7 @@ function Calendario_addToStorico(data) {
 }
 
 // ============================================================================
-// PREFERENZE.GS
+// APPS-SCRIPT/MODULES/PREFERENZE.GS
 // ============================================================================
 
 /**
@@ -952,13 +1097,37 @@ function Preferenze_clearPreferencesForUserInternal(data, userId) {
 }
 
 function getMeseRiferimento(dataString) {
-  const d = new Date(dataString);
+  const d = parseLocalDateForCalendar(dataString);
   const mesi = ['Gennaio', 'Febbraio', 'Marzo', 'Aprile', 'Maggio', 'Giugno', 'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'];
   return mesi[d.getMonth()] + ' ' + d.getFullYear();
 }
 
+function Preferenze_validateInput(data, userId) {
+  const colori = ['VERDE', 'BIANCO', 'GIALLO', 'ROSSO'];
+  if (!data || data.idTecnico !== userId || !/^\d{4}-\d{2}-\d{2}$/.test(String(data.data)) || colori.indexOf(data.preferenza) === -1) {
+    return { success: false, error: 'Preferenza, utente o data non validi' };
+  }
+
+  const date = parseLocalDateForCalendar(data.data);
+  if (isNaN(date.getTime()) || formatDate(date) !== data.data || (date.getDay() !== 0 && date.getDay() !== 6 && !isFestivo(date))) {
+    return { success: false, error: 'Le preferenze sono ammesse solo per sabati, domeniche e festivi' };
+  }
+
+  if (Anagrafica_isManagerUser(userId)) return { success: true };
+  const config = getConfigData();
+  const today = new Date();
+  const monthDistance = (date.getFullYear() - today.getFullYear()) * 12 + date.getMonth() - today.getMonth();
+  if (monthDistance < 1 || monthDistance > config.mesiFuturiMax) {
+    return { success: false, error: 'Data fuori dalla finestra configurata per le preferenze' };
+  }
+  if (monthDistance === 1 && today.getDate() > config.giornoFreeze) {
+    return { success: false, error: 'Preferenze congelate per il mese selezionato' };
+  }
+  return { success: true };
+}
+
 // ============================================================================
-// LOG.GS
+// APPS-SCRIPT/MODULES/LOG.GS
 // ============================================================================
 
 /**
@@ -1043,7 +1212,7 @@ function logAction(modulo, azione, targetId, actorId, dettagli) {
 }
 
 // ============================================================================
-// ALGORITMO.GS
+// APPS-SCRIPT/MODULES/ALGORITMO.GS
 // ============================================================================
 
 /**
@@ -1052,6 +1221,9 @@ function logAction(modulo, azione, targetId, actorId, dettagli) {
 
 function Algoritmo_calculateTurniAutomaticiInternal(userId) {
   try {
+    if (!Anagrafica_isManagerUser(userId)) {
+      return { success: false, error: 'Solo un manager può calcolare i turni' };
+    }
     const config = getConfigData();
     const usersResult = Anagrafica_getUsersInternal();
     const turnsResult = Calendario_getTurnsInternal();
@@ -1116,6 +1288,9 @@ function Algoritmo_calculateTurniAutomaticiInternal(userId) {
 
 function Algoritmo_updatePointsInternal(userId) {
   try {
+    if (!Anagrafica_isManagerUser(userId)) {
+      return { success: false, error: 'Solo un manager può riallineare i punteggi' };
+    }
     const usersSheet = getSheetOrInit('Anagrafica');
     const turnsResult = Calendario_getTurnsInternal();
     const turns = turnsResult.success ? turnsResult.turns : [];
@@ -1397,25 +1572,35 @@ function Config_isManagerUser(userId) {
 }
 
 // ============================================================================
-// CODE.GS - ROUTER PRINCIPALE
+// APPS-SCRIPT/CODE.GS
 // ============================================================================
+
+/**
+ * Reperibilità Smart - Area 4
+ * Entry Point - Router API
+ */
 
 function doGet(e) {
   const action = e.parameter.action;
   const token = e.parameter.token;
+
   try {
-    if (action !== 'login' && !verifyToken(token)) {
+    if (action === 'login') {
+      return jsonResponse({ success: false, error: 'Il login richiede una richiesta POST.' });
+    }
+    if (!verifyToken(token)) {
       return jsonResponse({ success: false, error: 'Sessione scaduta. Effettua il login.' });
     }
+
     const userId = getUserIdFromToken(token);
+
     switch(action) {
-      case 'login': return doLogin(e);
-      case 'getUsers': return jsonResponse(Anagrafica_getUsersInternal());
-      case 'getTurns': return jsonResponse(Calendario_getTurnsInternal());
-      case 'getPreferences': return jsonResponse(Preferenze_getPreferencesInternal());
+      case 'getUsers': return jsonResponse(Anagrafica_getUsers(userId));
+      case 'getTurns': return jsonResponse(Calendario_getTurns());
+      case 'getPreferences': return jsonResponse(Preferenze_getPreferences(userId));
       case 'getHolidays': return jsonResponse(getHolidays());
-      case 'getConfig': return jsonResponse(Config_getConfigInternal(userId));
-      case 'getLog': return jsonResponse(Log_getLogInternal());
+      case 'getConfig': return jsonResponse(Config_getConfig(userId));
+      case 'getLog': return jsonResponse(Log_getLog(userId));
       case 'getStats': return jsonResponse(getStats(userId));
       case 'getHealth': return jsonResponse(getHealth(userId));
       default: return jsonResponse({ success: false, error: 'Azione non valida: ' + action });
@@ -1428,26 +1613,35 @@ function doGet(e) {
 function doPost(e) {
   const action = e.parameter.action;
   const token = e.parameter.token;
+
   try {
-    const data = JSON.parse(e.postData.contents);
+    const data = JSON.parse(e.postData.contents || '{}');
+    if (action === 'login') {
+      return doLogin({ parameter: JSON.parse(e.postData.contents || '{}') });
+    }
+
     const userId = getUserIdFromToken(token);
+
     if (!verifyToken(token)) {
       return jsonResponse({ success: false, error: 'Sessione scaduta. Effettua il login.' });
     }
+
     switch(action) {
-      case 'addUser': return jsonResponse(Anagrafica_addUserInternal(data, userId));
-      case 'updateUser': return jsonResponse(Anagrafica_updateUserInternal(data, userId));
-      case 'setUserStatus': return jsonResponse(Anagrafica_setUserStatusInternal(data.id, data.stato, userId, data.motivo));
-      case 'addTurn': return jsonResponse(Calendario_addTurnInternal(data, userId));
-      case 'deleteTurn': return jsonResponse(Calendario_deleteTurnInternal(data.data, userId));
-      case 'setPreference': return jsonResponse(Preferenze_setPreferenceInternal(data, userId));
-      case 'calculateTurni': return jsonResponse(Algoritmo_calculateTurniAutomaticiInternal(userId));
-      case 'updatePoints': return jsonResponse(Algoritmo_updatePointsInternal(userId));
-      case 'resetPoints': return jsonResponse(Anagrafica_resetPointsInternal(userId));
-      case 'updateConfig': return jsonResponse(Config_updateConfigInternal(data, userId));
-      case 'changePin': return jsonResponse(Auth_changePinInternal(data.userId, data.newPin, userId));
-      case 'resetPin': return jsonResponse(Auth_resetPinInternal(data.userId, userId));
-      case 'getUserList': return jsonResponse(Auth_getUserListInternal(userId));
+      case 'addUser': return jsonResponse(Anagrafica_addUser(data, userId));
+      case 'updateUser': return jsonResponse(Anagrafica_updateUser(data, userId));
+      case 'setUserStatus': return jsonResponse(Anagrafica_setUserStatus(data, userId));
+      case 'addTurn': return jsonResponse(Calendario_addTurn(data, userId));
+      case 'deleteTurn': return jsonResponse(Calendario_deleteTurn(data, userId));
+      case 'setPreference': return jsonResponse(Preferenze_setPreference(data, userId));
+      case 'setPreferencesBatch': return jsonResponse(Preferenze_setPreferencesBatch(data, userId));
+      case 'clearPreferencesForUser': return jsonResponse(Preferenze_clearPreferencesForUser(data, userId));
+      case 'calculateTurni': return jsonResponse(Algoritmo_calculateTurniAutomatici(userId));
+      case 'updatePoints': return jsonResponse(Algoritmo_updatePoints(userId));
+      case 'resetPoints': return jsonResponse(Anagrafica_resetPoints(userId));
+      case 'updateConfig': return jsonResponse(Config_updateConfig(data, userId));
+      case 'changePin': return jsonResponse(Auth_changePin(data, userId));
+      case 'resetPin': return jsonResponse(Auth_resetPin(data, userId));
+      case 'getUserList': return jsonResponse(Auth_getUserList(userId));
       default: return jsonResponse({ success: false, error: 'Azione non valida: ' + action });
     }
   } catch (error) {
@@ -1458,25 +1652,56 @@ function doPost(e) {
 function doLogin(e) {
   const email = e.parameter.email;
   const pin = e.parameter.pin;
-  const result = Auth_loginInternal(email, pin);
+  const result = Auth_login(email, pin);
+
   if (result.success) {
-    const token = Utilities.base64Encode(result.user.id + '|' + new Date().getTime());
-    result.token = token;
+    result.token = createToken(result.user.id);
   }
+
   return jsonResponse(result);
+}
+
+function getTokenSecret() {
+  const properties = PropertiesService.getScriptProperties();
+  let secret = properties.getProperty('AUTH_TOKEN_SECRET');
+  if (!secret) {
+    secret = Utilities.getUuid() + Utilities.getUuid();
+    properties.setProperty('AUTH_TOKEN_SECRET', secret);
+  }
+  return secret;
+}
+
+function createToken(userId) {
+  const payload = userId + '|' + new Date().getTime();
+  const signature = Utilities.base64EncodeWebSafe(
+    Utilities.computeHmacSha256Signature(payload, getTokenSecret())
+  );
+  return Utilities.base64EncodeWebSafe(payload + '|' + signature);
+}
+
+function decodeToken(token) {
+  if (!token) return null;
+  const decoded = Utilities.newBlob(Utilities.base64DecodeWebSafe(token)).getDataAsString();
+  const parts = decoded.split('|');
+  if (parts.length !== 3) return null;
+  return { userId: parts[0], timestamp: Number(parts[1]), signature: parts[2] };
 }
 
 function verifyToken(token) {
   if (!token) return false;
+
   try {
-    const decoded = Utilities.base64Decode(token);
-    const decodedStr = Utilities.newBlob(decoded).getDataAsString();
-    const parts = decodedStr.split('|');
-    if (parts.length !== 2) return false;
-    const timestamp = parseInt(parts[1]);
+    const decoded = decodeToken(token);
+    if (!decoded || !decoded.userId || !Number.isFinite(decoded.timestamp)) return false;
+    const payload = decoded.userId + '|' + decoded.timestamp;
+    const expected = Utilities.base64EncodeWebSafe(
+      Utilities.computeHmacSha256Signature(payload, getTokenSecret())
+    );
+    if (decoded.signature !== expected) return false;
     const now = new Date().getTime();
     const hours24 = 24 * 60 * 60 * 1000;
-    return (now - timestamp) < hours24;
+    const age = now - decoded.timestamp;
+    return age >= 0 && age < hours24;
   } catch (e) {
     return false;
   }
@@ -1485,13 +1710,60 @@ function verifyToken(token) {
 function getUserIdFromToken(token) {
   if (!token) return null;
   try {
-    const decoded = Utilities.base64Decode(token);
-    const decodedStr = Utilities.newBlob(decoded).getDataAsString();
-    return decodedStr.split('|')[0];
+    const decoded = decodeToken(token);
+    return decoded ? decoded.userId : null;
   } catch (e) {
     return null;
   }
 }
+
+function Anagrafica_getUsers(userId) {
+  const result = Anagrafica_getUsersInternal();
+  if (!result.success || Anagrafica_isManagerUser(userId)) return result;
+  result.users = result.users.map(function(user) {
+    return {
+      id: user.id, nome: user.nome, cognome: user.cognome, email: '', stato: user.stato,
+      punti: user.id === userId ? user.punti : 0,
+      ultimoTurno: user.id === userId ? user.ultimoTurno : '',
+      dataAssunzione: '', note: ''
+    };
+  });
+  return result;
+}
+function Anagrafica_addUser(data, userId) { return Anagrafica_addUserInternal(data, userId); }
+function Anagrafica_updateUser(data, userId) { return Anagrafica_updateUserInternal(data, userId); }
+function Anagrafica_setUserStatus(data, userId) { return Anagrafica_setUserStatusInternal(data.id, data.stato, userId, data.motivo); }
+function Anagrafica_resetPoints(userId) { return Anagrafica_resetPointsInternal(userId); }
+
+function Calendario_getTurns() { return Calendario_getTurnsInternal(); }
+function Calendario_addTurn(data, userId) { return Calendario_addTurnInternal(data, userId); }
+function Calendario_deleteTurn(data, userId) { return Calendario_deleteTurnInternal(data.data, userId); }
+
+function Preferenze_getPreferences(userId) {
+  const result = Preferenze_getPreferencesInternal();
+  if (!result.success || Anagrafica_isManagerUser(userId)) return result;
+  result.preferences = result.preferences.filter(function(pref) { return pref.idTecnico === userId; });
+  return result;
+}
+function Preferenze_setPreference(data, userId) { return Preferenze_setPreferenceInternal(data, userId); }
+function Preferenze_setPreferencesBatch(data, userId) { return Preferenze_setPreferencesBatchInternal(data, userId); }
+function Preferenze_clearPreferencesForUser(data, userId) { return Preferenze_clearPreferencesForUserInternal(data, userId); }
+
+function Config_getConfig(userId) { return Config_getConfigInternal(userId); }
+function Config_updateConfig(data, userId) { return Config_updateConfigInternal(data, userId); }
+
+function Log_getLog(userId) {
+  if (!Anagrafica_isManagerUser(userId)) {
+    return { success: false, error: 'Accesso al log riservato ai manager' };
+  }
+  return Log_getLogInternal();
+}
+function Auth_login(email, pin) { return Auth_loginInternal(email, pin); }
+function Auth_changePin(data, userId) { return Auth_changePinInternal(data.userId, data.newPin, userId); }
+function Auth_resetPin(data, userId) { return Auth_resetPinInternal(data.userId, userId); }
+function Auth_getUserList(userId) { return Auth_getUserListInternal(userId); }
+function Algoritmo_calculateTurniAutomatici(userId) { return Algoritmo_calculateTurniAutomaticiInternal(userId); }
+function Algoritmo_updatePoints(userId) { return Algoritmo_updatePointsInternal(userId); }
 
 function getStats(userId) {
   try {
@@ -1499,12 +1771,14 @@ function getStats(userId) {
     const turnsResult = Calendario_getTurnsInternal();
     const users = usersResult.success ? usersResult.users : [];
     const turns = turnsResult.success ? turnsResult.turns : [];
+
     const stats = {
       totaleUtenti: users.length,
       utentiAttivi: users.filter(u => String(u.stato || '').trim().toUpperCase() === 'ON').length,
       turniAssegnati: turns.filter(t => t.statoTurno === 'ASSEGNATO').length,
       turniDaCoprire: turns.filter(t => !t.statoTurno || t.statoTurno === '').length
     };
+
     return { success: true, stats: stats };
   } catch (error) {
     return { success: false, error: error.toString() };
@@ -1594,12 +1868,8 @@ function getHolidays() {
 
     for (let year = startYear; year <= endYear; year++) {
       fixedHolidays.forEach(holiday => {
-        holidays.push({
-          data: formatDate(new Date(year, holiday.month, holiday.day)),
-          nome: holiday.nome,
-          tipo: 'Fissa',
-          anno: year
-        });
+        const date = new Date(year, holiday.month, holiday.day);
+        holidays.push({ data: formatDate(date), nome: holiday.nome, tipo: 'Fissa', anno: year });
       });
 
       const pasqua = calculateEasterDate(year);
@@ -1622,6 +1892,7 @@ function initTutto() {
   initCalendario();
   initPreferenze();
   initLog();
+  Config_initSheet();
   SpreadsheetApp.getUi().alert('✅ Inizializzazione completata!\n\nTutti i fogli sono stati creati.');
 }
 

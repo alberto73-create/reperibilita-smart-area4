@@ -90,7 +90,7 @@ function Calendario_addTurnInternal(data, userId) {
         sheet.getRange(row, 8).setValue(data.note || 'Forzatura manuale');
 
         Calendario_upsertStorico({ ...data, tipoGiorno: tipoGiorno, punti: punti });
-        Algoritmo_updatePointsInternal(userId);
+        if (!data.skipPointsUpdate) Algoritmo_updatePointsInternal(userId);
         logAction('CALENDARIO', 'UPSERT_TURN', data.idTecnico, userId, 'Turno impostato il ' + data.data);
 
         return { success: true, message: 'Turno impostato' };

@@ -23,7 +23,8 @@ Devi **copiare tutto il codice in un singolo file** `Code.gs` nell'ordine corret
 5. **modules/Preferenze.gs**
 6. **modules/Log.gs**
 7. **modules/Algoritmo.gs**
-8. **Code.gs** (copa per ULTIMO)
+8. **modules/Configurazione.gs**
+9. **Code.gs** (copia per ULTIMO)
 
 ### 4. Salva
 - Clicca su 💾
@@ -47,7 +48,7 @@ L'ordine è importante perché:
 
 ## ✅ Verifica
 
-Dopo aver copiato tutto, il file `Code.gs` finale dovrebbe avere circa **700+ righe**.
+Dopo aver copiato tutto, il file `Code.gs` finale dovrebbe avere circa **1.500+ righe**.
 
 Per verificare che funzioni:
 1. Esegui `initTutto`
@@ -73,4 +74,10 @@ Se preferisci, puoi usare questo approccio:
 1. Crea un file locale `concat.sh` (Linux/Mac) o `concat.bat` (Windows)
 2. Esegui per concatenare automaticamente
 
-Ma il metodo manuale (copia-incolla) è più sicuro per evitare errori.
+Il file completo si rigenera in modo deterministico con:
+
+```bash
+npm run build:apps-script
+```
+
+Prima di un deploy verifica che sia sincronizzato con `npm run check:apps-script`.

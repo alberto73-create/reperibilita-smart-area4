@@ -60,9 +60,6 @@ async function parseJsonResponse<T = any>(response: Response): Promise<T> {
 async function callAPI(action: string, data?: any, options?: ApiCallOptions): Promise<any> {
   const params = new URLSearchParams({ action });
   const token = localStorage.getItem('auth_token');
-  if (token) {
-    params.set('token', token);
-  }
 
   const url = `${API_BASE}?${params.toString()}`;
   const hasBody = data !== undefined || options?.forcePost === true;
@@ -72,6 +69,7 @@ async function callAPI(action: string, data?: any, options?: ApiCallOptions): Pr
     cache: 'no-store',
     headers: {
       'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: hasBody ? JSON.stringify(data ?? {}) : undefined,
   };
@@ -93,9 +91,14 @@ async function callAPI(action: string, data?: any, options?: ApiCallOptions): Pr
 // ==================== AUTH ====================
 
 export async function login(email: string, pin: string): Promise<LoginResult> {
-  const params = new URLSearchParams({ action: 'login', email, pin });
+  const params = new URLSearchParams({ action: 'login' });
   const url = `${API_BASE}?${params.toString()}`;
-  const response = await fetchWithTimeout(url, { method: 'GET', cache: 'no-store' });
+  const response = await fetchWithTimeout(url, {
+    method: 'POST',
+    cache: 'no-store',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, pin }),
+  });
   const result = await parseJsonResponse<LoginResult>(response);
 
   if (!response.ok) {

@@ -8,20 +8,22 @@ function doGet(e) {
   const token = e.parameter.token;
 
   try {
-    if (action !== 'login' && !verifyToken(token)) {
+    if (action === 'login') {
+      return jsonResponse({ success: false, error: 'Il login richiede una richiesta POST.' });
+    }
+    if (!verifyToken(token)) {
       return jsonResponse({ success: false, error: 'Sessione scaduta. Effettua il login.' });
     }
 
     const userId = getUserIdFromToken(token);
 
     switch(action) {
-      case 'login': return doLogin(e);
-      case 'getUsers': return jsonResponse(Anagrafica_getUsers());
+      case 'getUsers': return jsonResponse(Anagrafica_getUsers(userId));
       case 'getTurns': return jsonResponse(Calendario_getTurns());
-      case 'getPreferences': return jsonResponse(Preferenze_getPreferences());
+      case 'getPreferences': return jsonResponse(Preferenze_getPreferences(userId));
       case 'getHolidays': return jsonResponse(getHolidays());
       case 'getConfig': return jsonResponse(Config_getConfig(userId));
-      case 'getLog': return jsonResponse(Log_getLog());
+      case 'getLog': return jsonResponse(Log_getLog(userId));
       case 'getStats': return jsonResponse(getStats(userId));
       case 'getHealth': return jsonResponse(getHealth(userId));
       default: return jsonResponse({ success: false, error: 'Azione non valida: ' + action });
@@ -37,6 +39,10 @@ function doPost(e) {
 
   try {
     const data = JSON.parse(e.postData.contents || '{}');
+    if (action === 'login') {
+      return doLogin({ parameter: JSON.parse(e.postData.contents || '{}') });
+    }
+
     const userId = getUserIdFromToken(token);
 
     if (!verifyToken(token)) {
@@ -72,26 +78,53 @@ function doLogin(e) {
   const result = Auth_login(email, pin);
 
   if (result.success) {
-    const token = Utilities.base64Encode(result.user.id + '|' + new Date().getTime());
-    result.token = token;
+    result.token = createToken(result.user.id);
   }
 
   return jsonResponse(result);
+}
+
+function getTokenSecret() {
+  const properties = PropertiesService.getScriptProperties();
+  let secret = properties.getProperty('AUTH_TOKEN_SECRET');
+  if (!secret) {
+    secret = Utilities.getUuid() + Utilities.getUuid();
+    properties.setProperty('AUTH_TOKEN_SECRET', secret);
+  }
+  return secret;
+}
+
+function createToken(userId) {
+  const payload = userId + '|' + new Date().getTime();
+  const signature = Utilities.base64EncodeWebSafe(
+    Utilities.computeHmacSha256Signature(payload, getTokenSecret())
+  );
+  return Utilities.base64EncodeWebSafe(payload + '|' + signature);
+}
+
+function decodeToken(token) {
+  if (!token) return null;
+  const decoded = Utilities.newBlob(Utilities.base64DecodeWebSafe(token)).getDataAsString();
+  const parts = decoded.split('|');
+  if (parts.length !== 3) return null;
+  return { userId: parts[0], timestamp: Number(parts[1]), signature: parts[2] };
 }
 
 function verifyToken(token) {
   if (!token) return false;
 
   try {
-    const decoded = Utilities.base64Decode(token);
-    const decodedStr = Utilities.newBlob(decoded).getDataAsString();
-    const parts = decodedStr.split('|');
-    if (parts.length !== 2) return false;
-
-    const timestamp = parseInt(parts[1]);
+    const decoded = decodeToken(token);
+    if (!decoded || !decoded.userId || !Number.isFinite(decoded.timestamp)) return false;
+    const payload = decoded.userId + '|' + decoded.timestamp;
+    const expected = Utilities.base64EncodeWebSafe(
+      Utilities.computeHmacSha256Signature(payload, getTokenSecret())
+    );
+    if (decoded.signature !== expected) return false;
     const now = new Date().getTime();
     const hours24 = 24 * 60 * 60 * 1000;
-    return (now - timestamp) < hours24;
+    const age = now - decoded.timestamp;
+    return age >= 0 && age < hours24;
   } catch (e) {
     return false;
   }
@@ -100,15 +133,26 @@ function verifyToken(token) {
 function getUserIdFromToken(token) {
   if (!token) return null;
   try {
-    const decoded = Utilities.base64Decode(token);
-    const decodedStr = Utilities.newBlob(decoded).getDataAsString();
-    return decodedStr.split('|')[0];
+    const decoded = decodeToken(token);
+    return decoded ? decoded.userId : null;
   } catch (e) {
     return null;
   }
 }
 
-function Anagrafica_getUsers() { return Anagrafica_getUsersInternal(); }
+function Anagrafica_getUsers(userId) {
+  const result = Anagrafica_getUsersInternal();
+  if (!result.success || Anagrafica_isManagerUser(userId)) return result;
+  result.users = result.users.map(function(user) {
+    return {
+      id: user.id, nome: user.nome, cognome: user.cognome, email: '', stato: user.stato,
+      punti: user.id === userId ? user.punti : 0,
+      ultimoTurno: user.id === userId ? user.ultimoTurno : '',
+      dataAssunzione: '', note: ''
+    };
+  });
+  return result;
+}
 function Anagrafica_addUser(data, userId) { return Anagrafica_addUserInternal(data, userId); }
 function Anagrafica_updateUser(data, userId) { return Anagrafica_updateUserInternal(data, userId); }
 function Anagrafica_setUserStatus(data, userId) { return Anagrafica_setUserStatusInternal(data.id, data.stato, userId, data.motivo); }
@@ -118,7 +162,12 @@ function Calendario_getTurns() { return Calendario_getTurnsInternal(); }
 function Calendario_addTurn(data, userId) { return Calendario_addTurnInternal(data, userId); }
 function Calendario_deleteTurn(data, userId) { return Calendario_deleteTurnInternal(data.data, userId); }
 
-function Preferenze_getPreferences() { return Preferenze_getPreferencesInternal(); }
+function Preferenze_getPreferences(userId) {
+  const result = Preferenze_getPreferencesInternal();
+  if (!result.success || Anagrafica_isManagerUser(userId)) return result;
+  result.preferences = result.preferences.filter(function(pref) { return pref.idTecnico === userId; });
+  return result;
+}
 function Preferenze_setPreference(data, userId) { return Preferenze_setPreferenceInternal(data, userId); }
 function Preferenze_setPreferencesBatch(data, userId) { return Preferenze_setPreferencesBatchInternal(data, userId); }
 function Preferenze_clearPreferencesForUser(data, userId) { return Preferenze_clearPreferencesForUserInternal(data, userId); }
@@ -126,7 +175,12 @@ function Preferenze_clearPreferencesForUser(data, userId) { return Preferenze_cl
 function Config_getConfig(userId) { return Config_getConfigInternal(userId); }
 function Config_updateConfig(data, userId) { return Config_updateConfigInternal(data, userId); }
 
-function Log_getLog() { return Log_getLogInternal(); }
+function Log_getLog(userId) {
+  if (!Anagrafica_isManagerUser(userId)) {
+    return { success: false, error: 'Accesso al log riservato ai manager' };
+  }
+  return Log_getLogInternal();
+}
 function Auth_login(email, pin) { return Auth_loginInternal(email, pin); }
 function Auth_changePin(data, userId) { return Auth_changePinInternal(data.userId, data.newPin, userId); }
 function Auth_resetPin(data, userId) { return Auth_resetPinInternal(data.userId, userId); }
@@ -253,4 +307,18 @@ function getHolidays() {
   } catch (error) {
     return { success: false, error: error.toString() };
   }
+}
+
+function initTutto() {
+  initAuth();
+  initAnagrafica();
+  initCalendario();
+  initPreferenze();
+  initLog();
+  Config_initSheet();
+  SpreadsheetApp.getUi().alert('✅ Inizializzazione completata!\n\nTutti i fogli sono stati creati.');
+}
+
+function STEP2_inizializzaApi() {
+  initTutto();
 }
