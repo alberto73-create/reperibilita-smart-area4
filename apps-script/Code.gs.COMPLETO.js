@@ -659,7 +659,7 @@ function Calendario_addTurnInternal(data, userId) {
         sheet.getRange(row, 8).setValue(data.note || 'Forzatura manuale');
 
         Calendario_upsertStorico({ ...data, tipoGiorno: tipoGiorno, punti: punti });
-        if (!data.skipPointsUpdate) Algoritmo_updatePointsInternal(userId);
+        Algoritmo_updatePointsInternal(userId);
         logAction('CALENDARIO', 'UPSERT_TURN', data.idTecnico, userId, 'Turno impostato il ' + data.data);
 
         return { success: true, message: 'Turno impostato' };
@@ -761,6 +761,23 @@ function ensureCalendarioWindow(sheet) {
   if (newRows.length > 0) {
     sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, 8).setValues(newRows);
   }
+
+  sheet.appendRow([
+    date,
+    getNomeGiorno(dayOfWeek),
+    getTipoGiorno(dayOfWeek, isFestivo(date)),
+    '',
+    '',
+    '',
+    '',
+    ''
+  ]);
+}
+
+function parseLocalDateForCalendar(dataStr) {
+  if (dataStr instanceof Date) return dataStr;
+  const parts = String(dataStr).split('-').map(Number);
+  return new Date(parts[0], parts[1] - 1, parts[2]);
 }
 
 function ensureCalendarDateExists(sheet, dataStr) {
@@ -967,8 +984,6 @@ function Preferenze_setPreferenceInternal(data, userId) {
     if (!data || data.idTecnico !== userId) {
       return { success: false, error: 'Puoi modificare solo le tue preferenze' };
     }
-    const validation = Preferenze_validateInput(data, userId);
-    if (!validation.success) return validation;
 
     const sheet = initPreferenze();
     const rows = sheet.getDataRange().getValues();
@@ -1005,7 +1020,7 @@ function Preferenze_setPreferencesBatchInternal(data, userId) {
       return { success: true, updated: 0, created: 0, message: 'Nessuna preferenza da salvare' };
     }
 
-    const invalid = preferences.find(p => p.idTecnico !== userId || !Preferenze_validateInput(p, userId).success);
+    const invalid = preferences.find(p => p.idTecnico !== userId || !p.data || !p.preferenza);
     if (invalid) {
       return { success: false, error: 'Payload preferenze non valido o non autorizzato' };
     }
@@ -1236,7 +1251,7 @@ function Algoritmo_calculateTurniAutomaticiInternal(userId) {
       const result = assegnaTurno(turno, users, prefResult.preferences || [], config, allTurns);
 
       if (result.success) {
-        const saveResult = Calendario_addTurnInternal({
+        Calendario_addTurnInternal({
           data: turno.data,
           idTecnico: result.idTecnico,
           tecnicoNome: result.tecnicoNome,
@@ -1245,11 +1260,6 @@ function Algoritmo_calculateTurniAutomaticiInternal(userId) {
           note: 'Assegnazione automatica',
           skipPointsUpdate: true
         }, userId);
-
-        if (!saveResult.success) {
-          anomalie.push({ data: turno.data, motivo: saveResult.error || 'Salvataggio turno non riuscito' });
-          continue;
-        }
 
         const user = users.find(u => u.id === result.idTecnico);
         if (user) {
@@ -1405,7 +1415,7 @@ function getSmartRealPointsForTurn(idTecnico, turnoDate, allTurns) {
     }
 
     const assignedDate = parseLocalDateForCalendar(assignedTurn.data);
-    if (assignedDate < monthStart || assignedDate >= turnoDate) return totale;
+    if (assignedDate >= monthStart) return totale;
 
     return totale + (parseFloat(assignedTurn.puntiAssegnati) || 0);
   }, 0);
@@ -1425,6 +1435,15 @@ function getPreferenzaPerData(users, data, preferences) {
   return result;
 }
 
+function signedDaysBetween(date1, date2) {
+  const oneDay = 24 * 60 * 60 * 1000;
+  return Math.round((date2 - date1) / oneDay);
+}
+
+function daysBetween(date1, date2) {
+  return Math.abs(signedDaysBetween(date1, date2));
+}
+
 function getConfigData() {
   if (typeof Config_getConfigInternal === 'function') {
     const result = Config_getConfigInternal(null);
@@ -1442,27 +1461,6 @@ function getConfigData() {
     ultimoCalcolo: ''
   };
 }
-
-function getPuntiByTipoGiorno(tipoGiorno) {
-  const config = getConfigData();
-  if (tipoGiorno === 'FESTIVO') return config.puntiFestivo;
-  if (tipoGiorno === 'DOMENICA') return config.puntiDomenica;
-  if (tipoGiorno === 'SABATO') return config.puntiSabato;
-  return 0;
-}
-
-function signedDaysBetween(date1, date2) {
-  const oneDay = 24 * 60 * 60 * 1000;
-  return Math.round((date2 - date1) / oneDay);
-}
-
-function daysBetween(date1, date2) {
-  return Math.abs(signedDaysBetween(date1, date2));
-}
-
-// ============================================================================
-// APPS-SCRIPT/MODULES/CONFIGURAZIONE.GS
-// ============================================================================
 
 /**
  * Configurazione.gs - criteri di scelta e finestra calendario.
@@ -1604,6 +1602,7 @@ function doGet(e) {
       case 'getConfig': return jsonResponse(Config_getConfig(userId));
       case 'getLog': return jsonResponse(Log_getLog(userId));
       case 'getStats': return jsonResponse(getStats(userId));
+      case 'getHealth': return jsonResponse(getHealth(userId));
       default: return jsonResponse({ success: false, error: 'Azione non valida: ' + action });
     }
   } catch (error) {
@@ -1783,6 +1782,68 @@ function getStats(userId) {
     return { success: true, stats: stats };
   } catch (error) {
     return { success: false, error: error.toString() };
+  }
+}
+
+function getHealth(userId) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const requiredSheets = ['Auth', 'Anagrafica', 'Calendario', 'Preferenze_Colori', 'Configurazione', 'Log_IA'];
+    const sheets = {};
+
+    requiredSheets.forEach(name => {
+      const sheet = ss.getSheetByName(name);
+      sheets[name] = {
+        exists: Boolean(sheet),
+        rows: sheet ? Math.max(sheet.getLastRow() - 1, 0) : 0
+      };
+    });
+
+    const usersResult = Anagrafica_getUsersInternal();
+    const turnsResult = Calendario_getTurnsInternal();
+    const configResult = Config_getConfigInternal(userId);
+    const users = usersResult.success ? usersResult.users : [];
+    const turns = turnsResult.success ? turnsResult.turns : [];
+    const relevantTurns = turns.filter(t => t.tipoGiorno === 'SABATO' || t.tipoGiorno === 'DOMENICA' || t.tipoGiorno === 'FESTIVO');
+    const turniDaCoprire = relevantTurns.filter(t => !t.idTecnico && !t.statoTurno).length;
+    const turniAssegnati = relevantTurns.filter(t => t.statoTurno === 'ASSEGNATO' && t.idTecnico).length;
+    const warnings = [];
+
+    if (!usersResult.success) warnings.push('Anagrafica non leggibile: ' + usersResult.error);
+    if (!turnsResult.success) warnings.push('Calendario non leggibile: ' + turnsResult.error);
+    if (!configResult.success) warnings.push('Configurazione non leggibile: ' + configResult.error);
+    if (usersResult.success && users.length === 0) warnings.push('Nessun utente trovato in Anagrafica.');
+    if (turnsResult.success && relevantTurns.length === 0) warnings.push('Calendario operativo vuoto: non ci sono sabati, domeniche o festivi nella finestra configurata.');
+    if (turnsResult.success && relevantTurns.length > 0 && turniDaCoprire === 0) warnings.push('Nessun turno scoperto da assegnare nella finestra calendario corrente.');
+
+    return {
+      success: true,
+      health: {
+        dbRaggiungibile: true,
+        spreadsheetName: ss.getName(),
+        checkedAt: new Date().toISOString(),
+        sheets: sheets,
+        counts: {
+          utenti: users.length,
+          utentiAttivi: users.filter(u => String(u.stato || '').trim().toUpperCase() === 'ON').length,
+          turniTotali: relevantTurns.length,
+          turniDaCoprire: turniDaCoprire,
+          turniAssegnati: turniAssegnati
+        },
+        config: configResult.success ? configResult.config : null,
+        warnings: warnings
+      }
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: error.toString(),
+      health: {
+        dbRaggiungibile: false,
+        checkedAt: new Date().toISOString(),
+        warnings: ['Backend raggiunto, ma foglio non accessibile: ' + error.toString()]
+      }
+    };
   }
 }
 

@@ -2,10 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import './App.css'
 import './prefs-bulk.css'
-import type { User, Turn, Preference, Holiday, LogEntry, Stats, Config } from './types'
+import type { User, Turn, Preference, Holiday, LogEntry, Stats, Config, DbHealth } from './types'
 import {
   login as apiLogin, getConfig, updateConfig as apiUpdateConfig,
-  getUsers, getTurns, getPreferences, getLog, getStats, getHolidays,
+  getUsers, getTurns, getPreferences, getLog, getStats, getHolidays, getHealth,
   addUser, updateUser, setUserStatus, addTurn, deleteTurn, setPreference, setPreferencesBatch, clearPreferencesForUser,
   calculateTurniAutomatici, updatePoints, resetPoints, changePin, resetPin
 } from '../lib/api'
@@ -88,6 +88,7 @@ function App() {
   const [preferences, setPreferences] = useState<Preference[]>([])
   const [holidays, setHolidays] = useState<Holiday[]>([])
   const [stats, setStats] = useState<Stats | null>(null)
+  const [dbHealth, setDbHealth] = useState<DbHealth | null>(null)
   const [config, setConfig] = useState<Config>(DEFAULT_CONFIG)
   const [configDraft, setConfigDraft] = useState<Config>(DEFAULT_CONFIG)
   const [loading, setLoading] = useState(true)
@@ -111,12 +112,17 @@ function App() {
   const [savingPreferences, setSavingPreferences] = useState(false)
   const [pinToChange, setPinToChange] = useState({ userId: '', newPin: '' })
 
-  const activeUsers = useMemo(() => users.filter(u => u.stato === 'ON'), [users])
-  const assignedTurns = useMemo(
+  const activeUsers = useMemo(() => users.filter(u => String(u.stato || '').trim().toUpperCase() === 'ON'), [users])
+  const relevantTurns = useMemo(
     () => turns
-      .filter(t => t.statoTurno === 'ASSEGNATO')
+      .filter(t => t.tipoGiorno === 'SABATO' || t.tipoGiorno === 'DOMENICA' || t.tipoGiorno === 'FESTIVO')
       .sort((a, b) => parseLocalDate(a.data).getTime() - parseLocalDate(b.data).getTime()),
     [turns]
+  )
+
+  const assignedTurns = useMemo(
+    () => relevantTurns.filter(t => t.statoTurno === 'ASSEGNATO' && t.idTecnico),
+    [relevantTurns]
   )
 
   const selectedTurnDatesSet = useMemo(() => new Set(bulkTurnDates), [bulkTurnDates])
@@ -147,7 +153,7 @@ function App() {
 
     return Array.from(byUser.entries())
       .map(([id, value]) => ({ id, ...value }))
-      .filter(item => item.turni > 0 || users.some(user => user.id === item.id && user.stato === 'ON'))
+      .filter(item => item.turni > 0 || users.some(user => user.id === item.id && String(user.stato || '').trim().toUpperCase() === 'ON'))
       .sort((a, b) => b.punti - a.punti || b.turni - a.turni || a.nome.localeCompare(b.nome))
   }, [assignedTurns, users])
 
@@ -201,13 +207,14 @@ function App() {
     const cacheUserId = userIdForCache || currentUser?.id
     try {
       setLoading(true)
-      const [usersData, turnsData, preferencesData, holidaysData, statsData, configData] = await Promise.all([
+      const [usersData, turnsData, preferencesData, holidaysData, statsData, configData, healthData] = await Promise.all([
         getUsers(),
         getTurns(),
         getPreferences(),
         getHolidays(),
         getStats(),
-        getConfig()
+        getConfig(),
+        getHealth()
       ])
       const nextConfig = { ...DEFAULT_CONFIG, ...configData }
 
@@ -216,6 +223,7 @@ function App() {
       setPreferences(preferencesData)
       setHolidays(holidaysData)
       setStats(statsData)
+      setDbHealth(healthData)
       setConfig(nextConfig)
       setConfigDraft(nextConfig)
       setError(null)
@@ -235,15 +243,39 @@ function App() {
         setLastCacheAt(savedAt)
       }
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Errore nel caricamento'
       if (cacheUserId && hydrateCachedData(cacheUserId)) {
+        setDbHealth({
+          dbRaggiungibile: false,
+          checkedAt: new Date().toISOString(),
+          warnings: [`Sto mostrando dati da cache locale perché il DB/foglio non ha risposto: ${message}`]
+        })
         setError(null)
       } else {
-        setError(err instanceof Error ? err.message : 'Errore nel caricamento')
+        setDbHealth({
+          dbRaggiungibile: false,
+          checkedAt: new Date().toISOString(),
+          warnings: [message]
+        })
+        setError(message)
       }
     } finally {
       setLoading(false)
     }
   }, [currentUser?.id, hydrateCachedData])
+
+  const refreshDbHealth = async () => {
+    try {
+      const health = await getHealth()
+      setDbHealth(health)
+    } catch (err) {
+      setDbHealth({
+        dbRaggiungibile: false,
+        checkedAt: new Date().toISOString(),
+        warnings: [err instanceof Error ? err.message : 'DB non raggiungibile']
+      })
+    }
+  }
 
   const handleLogin = async (e: FormEvent) => {
     e.preventDefault()
@@ -648,8 +680,8 @@ function App() {
     if (!confirm('Avviare calcolo automatico per i mesi generati?')) return
     try {
       const result = await calculateTurniAutomatici()
-      alert(`Calcolo completato!\nAssegnazioni: ${result.assegnazioni}\nAnomalie: ${result.anomalie.length}`)
-      loadData()
+      alert(`Calcolo completato!\nAssegnazioni: ${result.assegnazioni}\nAnomalie: ${result.anomalie.length}${result.assegnazioni === 0 && result.anomalie.length === 0 ? '\n\nNota: non risultano turni scoperti nella finestra calendario. Controlla il banner DB o il foglio Calendario.' : ''}`)
+      await loadData()
     } catch (err) {
       alert('Errore: ' + (err instanceof Error ? err.message : 'errore sconosciuto'))
     }
@@ -795,6 +827,11 @@ function App() {
     )
   }
 
+  const dbStatusClass = dbHealth?.dbRaggiungibile ? (dbHealth.warnings.length > 0 ? 'warning' : 'ok') : 'error'
+  const dbStatusText = dbHealth?.dbRaggiungibile
+    ? `DB raggiungibile${dbHealth.spreadsheetName ? ` · ${dbHealth.spreadsheetName}` : ''}`
+    : 'DB non raggiungibile'
+
   return (
     <div className="app">
       <header className="header">
@@ -818,6 +855,24 @@ function App() {
           )}
         </nav>
       </header>
+
+      {dbHealth && (
+        <section className={`db-status ${dbStatusClass}`}>
+          <div>
+            <strong>{dbStatusClass === 'ok' ? '✅' : dbStatusClass === 'warning' ? '⚠️' : '❌'} {dbStatusText}</strong>
+            {dbHealth.counts && (
+              <span> · Utenti attivi: {dbHealth.counts.utentiAttivi}/{dbHealth.counts.utenti} · Turni: {dbHealth.counts.turniTotali} · Da coprire: {dbHealth.counts.turniDaCoprire} · Assegnati: {dbHealth.counts.turniAssegnati}</span>
+            )}
+            {dbHealth.checkedAt && <small> · controllo {new Date(dbHealth.checkedAt).toLocaleString('it-IT')}</small>}
+            {dbHealth.warnings.length > 0 && (
+              <ul>
+                {dbHealth.warnings.map((warning, index) => <li key={index}>{warning}</li>)}
+              </ul>
+            )}
+          </div>
+          <button type="button" onClick={refreshDbHealth}>Ricontrolla DB</button>
+        </section>
+      )}
 
       <main className="main">
         {activeTab === 'calendar' && (
@@ -1004,13 +1059,17 @@ function App() {
                 </tr>
               </thead>
               <tbody>
-                {assignedTurns.map(turn => (
+                {relevantTurns.length === 0 && (
+                  <tr><td colSpan={currentUser?.isManager ? 7 : 5} className="empty-state">Nessun turno operativo trovato nella finestra calendario. Controlla il banner DB e la configurazione.</td></tr>
+                )}
+                {relevantTurns.map(turn => (
                   <tr key={turn.data}>
                     {currentUser?.isManager && (
                       <td>
                         <input
                           type="checkbox"
                           checked={selectedTurnDatesSet.has(turn.data)}
+                          disabled={turn.statoTurno !== 'ASSEGNATO' || !turn.idTecnico}
                           onChange={() => handleToggleTurnSelection(turn.data)}
                           aria-label={`Seleziona turno del ${turn.data}`}
                         />
@@ -1019,12 +1078,12 @@ function App() {
                     <td>{parseLocalDate(turn.data).toLocaleDateString('it-IT')}</td>
                     <td>{turn.giorno}</td>
                     <td><span className={`turn-type ${turn.tipoGiorno.toLowerCase()}`}>{turn.tipoGiorno}</span></td>
-                    <td>{turn.tecnicoAssegnato}</td>
-                    <td>{turn.puntiAssegnati}</td>
+                    <td>{turn.tecnicoAssegnato || <span className="unassigned">Da assegnare</span>}</td>
+                    <td>{turn.puntiAssegnati || '-'}</td>
                     {currentUser?.isManager && (
                       <td>
                         <button className="toggle-btn" onClick={() => handleOpenTurnModal(parseLocalDate(turn.data))}>Forza</button>
-                        <button className="delete-btn" onClick={() => handleDeleteTurn(turn.data)}>Elimina</button>
+                        {turn.statoTurno === 'ASSEGNATO' && <button className="delete-btn" onClick={() => handleDeleteTurn(turn.data)}>Elimina</button>}
                       </td>
                     )}
                   </tr>

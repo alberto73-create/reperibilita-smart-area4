@@ -203,7 +203,7 @@ function getSmartRealPointsForTurn(idTecnico, turnoDate, allTurns) {
     }
 
     const assignedDate = parseLocalDateForCalendar(assignedTurn.data);
-    if (assignedDate < monthStart || assignedDate >= turnoDate) return totale;
+    if (assignedDate >= monthStart) return totale;
 
     return totale + (parseFloat(assignedTurn.puntiAssegnati) || 0);
   }, 0);

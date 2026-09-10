@@ -1034,3 +1034,60 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* ==================== DB STATUS ==================== */
+
+.db-status {
+  margin: 1rem 2rem 0;
+  padding: 0.9rem 1rem;
+  border-radius: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  color: #1f2937;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+}
+
+.db-status.ok {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.db-status.warning {
+  border-color: #facc15;
+  background: #fefce8;
+}
+
+.db-status.error {
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+
+.db-status span,
+.db-status small {
+  color: #475569;
+}
+
+.db-status ul {
+  margin: 0.45rem 0 0 1.2rem;
+  color: #92400e;
+}
+
+.db-status button {
+  border: none;
+  border-radius: 8px;
+  padding: 0.55rem 0.8rem;
+  background: #334155;
+  color: white;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.unassigned {
+  color: #b45309;
+  font-weight: 700;
+}
